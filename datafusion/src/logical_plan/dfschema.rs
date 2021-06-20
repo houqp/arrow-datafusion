@@ -48,6 +48,7 @@ impl DFSchema {
     pub fn new(fields: Vec<DFField>) -> Result<Self> {
         let mut qualified_names = HashSet::new();
         let mut unqualified_names = HashSet::new();
+
         for field in &fields {
             if let Some(qualifier) = field.qualifier() {
                 if !qualified_names.insert((qualifier, field.name())) {
@@ -55,6 +56,15 @@ impl DFSchema {
                         "Schema contains duplicate qualified field name '{}'",
                         field.qualified_name()
                     )));
+                }
+            } else if let Some(shared_qualifiers) = field.shared_qualifiers() {
+                for qualifier in shared_qualifiers {
+                    if !qualified_names.insert((qualifier, field.name())) {
+                        return Err(DataFusionError::Plan(format!(
+                            "Schema contains duplicate qualified field name '{}'",
+                            field.qualified_name()
+                        )));
+                    }
                 }
             } else if !unqualified_names.insert(field.name()) {
                 return Err(DataFusionError::Plan(format!(
@@ -94,10 +104,7 @@ impl DFSchema {
             schema
                 .fields()
                 .iter()
-                .map(|f| DFField {
-                    field: f.clone(),
-                    qualifier: Some(qualifier.to_owned()),
-                })
+                .map(|f| DFField::from_qualified(qualifier, f.clone()))
                 .collect(),
         )
     }
@@ -145,35 +152,66 @@ impl DFSchema {
         Err(DataFusionError::Plan(format!("No field named '{}'", name)))
     }
 
-    /// Find the index of the column with the given qualifer and name
-    pub fn index_of_column(&self, col: &Column) -> Result<usize> {
-        for i in 0..self.fields.len() {
-            let field = &self.fields[i];
-            if field.qualifier() == col.relation.as_ref() && field.name() == &col.name {
-                return Ok(i);
-            }
+    fn index_of_column_by_name(
+        &self,
+        qualifier: Option<&str>,
+        name: &str,
+    ) -> Result<usize> {
+        let matches: Vec<usize> = self
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| match (qualifier, &field.qualifier) {
+                (Some(q), Some(field_q)) => q == field_q && field.name() == name,
+                // when field qualifier is none but qualifier to look up is not, we consider it a
+                // match as long as look up qualifier is in self.qualifiers set
+                (Some(q), None) => {
+                    if let Some(shared_q) = field.shared_qualifiers() {
+                        shared_q.contains(q) && field.name() == name
+                    } else {
+                        false
+                    }
+                }
+                _ => field.name() == name,
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
+        match matches.len() {
+            0 => Err(DataFusionError::Plan(format!(
+                "No field named '{}.{}'",
+                qualifier.unwrap_or(""),
+                name
+            ))),
+            1 => Ok(matches[0]),
+            _ => Err(DataFusionError::Internal(format!(
+                "Ambiguous reference to qualified field named '{}.{}'",
+                qualifier.unwrap_or(""),
+                name
+            ))),
         }
-        Err(DataFusionError::Plan(format!(
-            "No field matches column '{}'",
-            col,
-        )))
+    }
+
+    /// Find the index of the column with the given qualifier and name
+    pub fn index_of_column(&self, col: &Column) -> Result<usize> {
+        self.index_of_column_by_name(col.relation.as_ref().map(|s| s.as_str()), &col.name)
     }
 
     /// Find the field with the given name
     pub fn field_with_name(
         &self,
-        relation_name: Option<&str>,
+        qualifier: Option<&str>,
         name: &str,
-    ) -> Result<DFField> {
-        if let Some(relation_name) = relation_name {
-            self.field_with_qualified_name(relation_name, name)
+    ) -> Result<&DFField> {
+        if let Some(qualifier) = qualifier {
+            self.field_with_qualified_name(qualifier, name)
         } else {
             self.field_with_unqualified_name(name)
         }
     }
 
     /// Find the field with the given name
-    pub fn field_with_unqualified_name(&self, name: &str) -> Result<DFField> {
+    pub fn field_with_unqualified_name(&self, name: &str) -> Result<&DFField> {
         let matches: Vec<&DFField> = self
             .fields
             .iter()
@@ -184,7 +222,7 @@ impl DFSchema {
                 "No field with unqualified name '{}'",
                 name
             ))),
-            1 => Ok(matches[0].to_owned()),
+            1 => Ok(matches[0]),
             _ => Err(DataFusionError::Plan(format!(
                 "Ambiguous reference to field named '{}'",
                 name
@@ -195,31 +233,15 @@ impl DFSchema {
     /// Find the field with the given qualified name
     pub fn field_with_qualified_name(
         &self,
-        relation_name: &str,
+        qualifier: &str,
         name: &str,
-    ) -> Result<DFField> {
-        let matches: Vec<&DFField> = self
-            .fields
-            .iter()
-            .filter(|field| {
-                field.qualifier == Some(relation_name.to_string()) && field.name() == name
-            })
-            .collect();
-        match matches.len() {
-            0 => Err(DataFusionError::Plan(format!(
-                "No field named '{}.{}'",
-                relation_name, name
-            ))),
-            1 => Ok(matches[0].to_owned()),
-            _ => Err(DataFusionError::Internal(format!(
-                "Ambiguous reference to qualified field named '{}.{}'",
-                relation_name, name
-            ))),
-        }
+    ) -> Result<&DFField> {
+        let idx = self.index_of_column_by_name(Some(qualifier), name)?;
+        Ok(self.field(idx))
     }
 
     /// Find the field with the given qualified column
-    pub fn field_from_qualified_column(&self, column: &Column) -> Result<DFField> {
+    pub fn field_from_column(&self, column: &Column) -> Result<&DFField> {
         match &column.relation {
             Some(r) => self.field_with_qualified_name(r, &column.name),
             None => self.field_with_unqualified_name(&column.name),
@@ -240,31 +262,20 @@ impl DFSchema {
             fields: self
                 .fields
                 .into_iter()
-                .map(|f| {
-                    if f.qualifier().is_some() {
-                        DFField::new(
-                            None,
-                            f.name(),
-                            f.data_type().to_owned(),
-                            f.is_nullable(),
-                        )
-                    } else {
-                        f
-                    }
-                })
+                .map(|f| f.strip_qualifier())
                 .collect(),
         }
     }
 
     /// Replace all field qualifier with new value in schema
-    pub fn replace_qualifier(self, qualifer: &str) -> Self {
+    pub fn replace_qualifier(self, qualifier: &str) -> Self {
         DFSchema {
             fields: self
                 .fields
                 .into_iter()
                 .map(|f| {
                     DFField::new(
-                        Some(qualifer),
+                        Some(qualifier),
                         f.name(),
                         f.data_type().to_owned(),
                         f.is_nullable(),
@@ -312,10 +323,7 @@ impl TryFrom<Schema> for DFSchema {
             schema
                 .fields()
                 .iter()
-                .map(|f| DFField {
-                    field: f.clone(),
-                    qualifier: None,
-                })
+                .map(|f| DFField::from(f.clone()))
                 .collect(),
         )
     }
@@ -385,6 +393,9 @@ impl Display for DFSchema {
 pub struct DFField {
     /// Optional qualifier (usually a table or relation name)
     qualifier: Option<String>,
+    /// Optional set of qualifiers that all share this same field. This is used for `JOIN USING`
+    /// clause where the join keys are combined into a shared column.
+    shared_qualifiers: Option<HashSet<String>>,
     /// Arrow field definition
     field: Field,
 }
@@ -399,6 +410,7 @@ impl DFField {
     ) -> Self {
         DFField {
             qualifier: qualifier.map(|s| s.to_owned()),
+            shared_qualifiers: None,
             field: Field::new(name, data_type, nullable),
         }
     }
@@ -407,6 +419,7 @@ impl DFField {
     pub fn from(field: Field) -> Self {
         Self {
             qualifier: None,
+            shared_qualifiers: None,
             field,
         }
     }
@@ -415,6 +428,7 @@ impl DFField {
     pub fn from_qualified(qualifier: &str, field: Field) -> Self {
         Self {
             qualifier: Some(qualifier.to_owned()),
+            shared_qualifiers: None,
             field,
         }
     }
@@ -436,8 +450,8 @@ impl DFField {
 
     /// Returns a string to the `DFField`'s qualified name
     pub fn qualified_name(&self) -> String {
-        if let Some(relation_name) = &self.qualifier {
-            format!("{}.{}", relation_name, self.field.name())
+        if let Some(qualifier) = &self.qualifier {
+            format!("{}.{}", qualifier, self.field.name())
         } else {
             self.field.name().to_owned()
         }
@@ -451,14 +465,40 @@ impl DFField {
         }
     }
 
+    /// Builds an unqualified column based on self
+    pub fn unqualified_column(&self) -> Column {
+        Column {
+            relation: None,
+            name: self.field.name().to_string(),
+        }
+    }
+
     /// Get the optional qualifier
     pub fn qualifier(&self) -> Option<&String> {
         self.qualifier.as_ref()
     }
 
+    /// Get the optional qualifier
+    pub fn shared_qualifiers(&self) -> Option<&HashSet<String>> {
+        self.shared_qualifiers.as_ref()
+    }
+
     /// Get the arrow field
     pub fn field(&self) -> &Field {
         &self.field
+    }
+
+    /// Return field with qualifier stripped
+    pub fn strip_qualifier(mut self) -> Self {
+        self.qualifier = None;
+        self
+    }
+
+    /// Return field with shared qualifiers set and qualifier stripped
+    pub fn set_shared_qualifiers(mut self, shared_qualifiers: HashSet<String>) -> Self {
+        self.qualifier = None;
+        self.shared_qualifiers = Some(shared_qualifiers);
+        self
     }
 }
 
