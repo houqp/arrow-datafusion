@@ -785,7 +785,7 @@ mod tests {
         let a = Arc::new(Int32Array::from(vec![8, 32, 128, 512, 2048]));
         let b = Arc::new(Int32Array::from(vec![2, 4, 7, 14, 32]));
 
-        apply_arithmetic::<Int32Type>(
+        apply_arithmetic::<i32>(
             schema,
             vec![a, b],
             Operator::Modulo,

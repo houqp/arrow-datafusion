@@ -18,17 +18,13 @@
 //! Functionality used both on logical and physical plans
 
 use crate::error::{DataFusionError, Result};
-use ahash::{CallHasher, RandomState};
+pub use ahash::{CallHasher, RandomState};
 use arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Date64Array, DictionaryArray,
-    Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
-    LargeStringArray, StringArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    Array, ArrayRef, BooleanArray, DictionaryArray, DictionaryKey, Float32Array,
+    Float64Array, Int16Array, Int32Array, Int64Array, Int8Array, UInt16Array,
+    UInt32Array, UInt64Array, UInt8Array, Utf8Array,
 };
-use arrow::datatypes::{
-    ArrowDictionaryKeyType, ArrowNativeType, DataType, Field, Int16Type, Int32Type,
-    Int64Type, Int8Type, Schema, TimeUnit, UInt16Type, UInt32Type, UInt64Type, UInt8Type,
-};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -250,7 +246,7 @@ macro_rules! hash_array_float {
 }
 
 /// Hash the values in a dictionary array
-fn create_hashes_dictionary<K: ArrowDictionaryKeyType>(
+fn create_hashes_dictionary<K: DictionaryKey>(
     array: &ArrayRef,
     random_state: &RandomState,
     hashes_buffer: &mut Vec<u64>,
@@ -432,7 +428,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Timestamp(TimeUnit::Millisecond, None) => {
                 hash_array_primitive!(
-                    TimestampMillisecondArray,
+                    Int64Array,
                     col,
                     i64,
                     hashes_buffer,
@@ -442,7 +438,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Timestamp(TimeUnit::Microsecond, None) => {
                 hash_array_primitive!(
-                    TimestampMicrosecondArray,
+                    Int64Array,
                     col,
                     i64,
                     hashes_buffer,
@@ -452,7 +448,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Timestamp(TimeUnit::Nanosecond, None) => {
                 hash_array_primitive!(
-                    TimestampNanosecondArray,
+                    Int64Array,
                     col,
                     i64,
                     hashes_buffer,
@@ -462,7 +458,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Date32 => {
                 hash_array_primitive!(
-                    Date32Array,
+                    Int32Array,
                     col,
                     i32,
                     hashes_buffer,
@@ -472,7 +468,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Date64 => {
                 hash_array_primitive!(
-                    Date64Array,
+                    Int64Array,
                     col,
                     i64,
                     hashes_buffer,
@@ -492,7 +488,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Utf8 => {
                 hash_array!(
-                    StringArray,
+                    Utf8Array::<i32>,
                     col,
                     str,
                     hashes_buffer,
@@ -502,7 +498,7 @@ pub fn create_hashes<'a>(
             }
             DataType::LargeUtf8 => {
                 hash_array!(
-                    LargeStringArray,
+                    Utf8Array::<i64>,
                     col,
                     str,
                     hashes_buffer,
@@ -512,7 +508,7 @@ pub fn create_hashes<'a>(
             }
             DataType::Dictionary(index_type, _) => match **index_type {
                 DataType::Int8 => {
-                    create_hashes_dictionary::<Int8Type>(
+                    create_hashes_dictionary::<i8>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -520,7 +516,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::Int16 => {
-                    create_hashes_dictionary::<Int16Type>(
+                    create_hashes_dictionary::<i16>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -528,7 +524,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::Int32 => {
-                    create_hashes_dictionary::<Int32Type>(
+                    create_hashes_dictionary::<i32>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -536,7 +532,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::Int64 => {
-                    create_hashes_dictionary::<Int64Type>(
+                    create_hashes_dictionary::<i64>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -544,7 +540,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::UInt8 => {
-                    create_hashes_dictionary::<UInt8Type>(
+                    create_hashes_dictionary::<u8>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -552,7 +548,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::UInt16 => {
-                    create_hashes_dictionary::<UInt16Type>(
+                    create_hashes_dictionary::<u16>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -560,7 +556,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::UInt32 => {
-                    create_hashes_dictionary::<UInt32Type>(
+                    create_hashes_dictionary::<u32>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -568,7 +564,7 @@ pub fn create_hashes<'a>(
                     )?;
                 }
                 DataType::UInt64 => {
-                    create_hashes_dictionary::<UInt64Type>(
+                    create_hashes_dictionary::<u64>(
                         col,
                         random_state,
                         hashes_buffer,
@@ -598,7 +594,7 @@ pub fn create_hashes<'a>(
 mod tests {
     use std::sync::Arc;
 
-    use arrow::{array::DictionaryArray, datatypes::Int8Type};
+    use arrow::array::DictionaryArray;
 
     use super::*;
 
@@ -683,13 +679,9 @@ mod tests {
     fn create_hashes_for_dict_arrays() {
         let strings = vec![Some("foo"), None, Some("bar"), Some("foo"), None];
 
-        let string_array = Arc::new(strings.iter().cloned().collect::<StringArray>());
-        let dict_array = Arc::new(
-            strings
-                .iter()
-                .cloned()
-                .collect::<DictionaryArray<Int8Type>>(),
-        );
+        let string_array = Arc::new(strings.iter().cloned().collect::<Utf8Array<i32>>());
+        let dict_array =
+            Arc::new(strings.iter().cloned().collect::<DictionaryArray<i8>>());
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
 
@@ -728,13 +720,9 @@ mod tests {
         let strings1 = vec![Some("foo"), None, Some("bar")];
         let strings2 = vec![Some("blarg"), Some("blah"), None];
 
-        let string_array = Arc::new(strings1.iter().cloned().collect::<StringArray>());
-        let dict_array = Arc::new(
-            strings2
-                .iter()
-                .cloned()
-                .collect::<DictionaryArray<Int32Type>>(),
-        );
+        let string_array = Arc::new(strings1.iter().cloned().collect::<Utf8Array<i32>>());
+        let dict_array =
+            Arc::new(strings2.iter().cloned().collect::<DictionaryArray<i32>>());
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
 

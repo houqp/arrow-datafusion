@@ -18,7 +18,6 @@
 //! Implementations for DISTINCT expressions, e.g. `COUNT(DISTINCT c)`
 
 use std::any::Any;
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 

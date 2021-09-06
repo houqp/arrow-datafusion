@@ -20,39 +20,24 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::Utf8Array;
-use arrow::array::*;
-use arrow::datatypes::ArrowPrimitiveType;
 use arrow::{
+    array::*,
+    bitmap::Bitmap,
     datatypes::{DataType, Schema},
     record_batch::RecordBatch,
+    types::NativeType,
 };
 
 use crate::error::{DataFusionError, Result};
 use crate::physical_plan::{ColumnarValue, PhysicalExpr};
 use crate::scalar::ScalarValue;
-use arrow::array::*;
-use arrow::buffer::{Buffer, MutableBuffer};
 
 macro_rules! compare_op_scalar {
     ($left: expr, $right:expr, $op:expr) => {{
-        let null_bit_buffer = $left.data().null_buffer().cloned();
-
-        let comparison =
-            (0..$left.len()).map(|i| unsafe { $op($left.value_unchecked(i), $right) });
-        // same as $left.len()
-        let buffer = unsafe { MutableBuffer::from_trusted_len_iter_bool(comparison) };
-
-        let data = ArrayData::new(
-            DataType::Boolean,
-            $left.len(),
-            None,
-            null_bit_buffer,
-            0,
-            vec![Buffer::from(buffer)],
-            vec![],
-        );
-        Ok(BooleanArray::from(data))
+        let validity = $left.validity();
+        let values =
+            Bitmap::from_trusted_len_iter($left.values_iter().map(|x| $op(x, $right)));
+        Ok(BooleanArray::from_data(DataType::Boolean, values, validity))
     }};
 }
 
@@ -175,39 +160,33 @@ macro_rules! make_contains_primitive {
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
-fn in_list_primitive<T: ArrowPrimitiveType>(
+fn in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
-    values: &[<T as ArrowPrimitiveType>::Native],
+    values: &[<T as NativeType>],
 ) -> Result<BooleanArray> {
-    compare_op_scalar!(
-        array,
-        values,
-        |x, v: &[<T as ArrowPrimitiveType>::Native]| v.contains(&x)
-    )
+    compare_op_scalar!(array, values, |x, v: &[<T as NativeType>]| v
+        .contains(&x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
-fn not_in_list_primitive<T: ArrowPrimitiveType>(
+fn not_in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
-    values: &[<T as ArrowPrimitiveType>::Native],
+    values: &[<T as NativeType>],
 ) -> Result<BooleanArray> {
-    compare_op_scalar!(
-        array,
-        values,
-        |x, v: &[<T as ArrowPrimitiveType>::Native]| !v.contains(&x)
-    )
+    compare_op_scalar!(array, values, |x, v: &[<T as NativeType>]| !v
+        .contains(&x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
-fn in_list_utf8<OffsetSize: StringOffsetSizeTrait>(
-    array: &GenericStringArray<OffsetSize>,
+fn in_list_utf8<OffsetSize: Offset>(
+    array: &Utf8Array<OffsetSize>,
     values: &[&str],
 ) -> Result<BooleanArray> {
     compare_op_scalar!(array, values, |x, v: &[&str]| v.contains(&x))
 }
 
-fn not_in_list_utf8<OffsetSize: StringOffsetSizeTrait>(
-    array: &GenericStringArray<OffsetSize>,
+fn not_in_list_utf8<OffsetSize: Offset>(
+    array: &Utf8Array<OffsetSize>,
     values: &[&str],
 ) -> Result<BooleanArray> {
     compare_op_scalar!(array, values, |x, v: &[&str]| !v.contains(&x))

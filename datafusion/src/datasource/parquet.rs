@@ -21,10 +21,12 @@ use std::any::Any;
 use std::fs::File;
 use std::sync::Arc;
 
-use parquet::arrow::ArrowReader;
-use parquet::arrow::ParquetFileArrowReader;
-use parquet::file::serialized_reader::SerializedFileReader;
-use parquet::file::statistics::Statistics as ParquetStatistics;
+use arrow::io::parquet::read::{get_schema, read_metadata};
+use parquet::statistics::{
+    BinaryStatistics as ParquetBinaryStatistics,
+    BooleanStatistics as ParquetBooleanStatistics,
+    PrimitiveStatistics as ParquetPrimitiveStatistics, Statistics as ParquetStatistics,
+};
 
 use super::datasource::TableProviderFilterPushDown;
 use crate::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -210,26 +212,29 @@ impl ParquetTableDescriptor {
         min_values: &mut Vec<Option<MinAccumulator>>,
         fields: &[Field],
         i: usize,
-        stat: &ParquetStatistics,
-    ) {
-        match stat {
-            ParquetStatistics::Boolean(s) => {
-                if let DataType::Boolean = fields[i].data_type() {
-                    if s.has_min_max_set() {
-                        if let Some(max_value) = &mut max_values[i] {
-                            match max_value
-                                .update(&[ScalarValue::Boolean(Some(*s.max()))])
-                            {
+        stats: Arc<dyn ParquetStatistics>,
+    ) -> Result<()> {
+        use arrow::io::parquet::read::PhysicalType;
+
+        macro_rules! update_primitive_min_max {
+            ($DT:ident, $PRIMITIVE_TYPE:ident) => {{
+                if let DataType::$DT = fields[i].data_type() {
+                    let stats = stats
+                        .as_any()
+                        .downcast_ref::<ParquetPrimitiveStatistics<$PRIMITIVE_TYPE>>()?;
+                    if let Some(max_value) = &mut max_values[i] {
+                        if let Some(v) = stats.max_value {
+                            match max_value.update(&[ScalarValue::$DT(Some(v))]) {
                                 Ok(_) => {}
                                 Err(_) => {
                                     max_values[i] = None;
                                 }
                             }
                         }
-                        if let Some(min_value) = &mut min_values[i] {
-                            match min_value
-                                .update(&[ScalarValue::Boolean(Some(*s.min()))])
-                            {
+                    }
+                    if let Some(min_value) = &mut min_values[i] {
+                        if let Some(v) = stats.min_value {
+                            match min_value.update(&[ScalarValue::$DT(Some(v))]) {
                                 Ok(_) => {}
                                 Err(_) => {
                                     min_values[i] = None;
@@ -238,122 +243,96 @@ impl ParquetTableDescriptor {
                         }
                     }
                 }
-            }
-            ParquetStatistics::Int32(s) => {
-                if let DataType::Int32 = fields[i].data_type() {
-                    if s.has_min_max_set() {
-                        if let Some(max_value) = &mut max_values[i] {
-                            match max_value.update(&[ScalarValue::Int32(Some(*s.max()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    max_values[i] = None;
-                                }
-                            }
-                        }
-                        if let Some(min_value) = &mut min_values[i] {
-                            match min_value.update(&[ScalarValue::Int32(Some(*s.min()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    min_values[i] = None;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ParquetStatistics::Int64(s) => {
-                if let DataType::Int64 = fields[i].data_type() {
-                    if s.has_min_max_set() {
-                        if let Some(max_value) = &mut max_values[i] {
-                            match max_value.update(&[ScalarValue::Int64(Some(*s.max()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    max_values[i] = None;
-                                }
-                            }
-                        }
-                        if let Some(min_value) = &mut min_values[i] {
-                            match min_value.update(&[ScalarValue::Int64(Some(*s.min()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    min_values[i] = None;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ParquetStatistics::Float(s) => {
-                if let DataType::Float32 = fields[i].data_type() {
-                    if s.has_min_max_set() {
-                        if let Some(max_value) = &mut max_values[i] {
-                            match max_value
-                                .update(&[ScalarValue::Float32(Some(*s.max()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    max_values[i] = None;
-                                }
-                            }
-                        }
-                        if let Some(min_value) = &mut min_values[i] {
-                            match min_value
-                                .update(&[ScalarValue::Float32(Some(*s.min()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    min_values[i] = None;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ParquetStatistics::Double(s) => {
-                if let DataType::Float64 = fields[i].data_type() {
-                    if s.has_min_max_set() {
-                        if let Some(max_value) = &mut max_values[i] {
-                            match max_value
-                                .update(&[ScalarValue::Float64(Some(*s.max()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    max_values[i] = None;
-                                }
-                            }
-                        }
-                        if let Some(min_value) = &mut min_values[i] {
-                            match min_value
-                                .update(&[ScalarValue::Float64(Some(*s.min()))])
-                            {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    min_values[i] = None;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
+            }};
         }
+
+        match stats.physical_type() {
+            PhysicalType::Boolean => {
+                if let DataType::Boolean = fields[i].data_type() {
+                    let stats =
+                        stats.as_any().downcast_ref::<ParquetBooleanStatistics>()?;
+                    if let Some(max_value) = &mut max_values[i] {
+                        if let Some(v) = stats.max_value {
+                            match max_value.update(&[ScalarValue::Boolean(Some(v))]) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    max_values[i] = None;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(min_value) = &mut min_values[i] {
+                        if let Some(v) = stats.min_value {
+                            match min_value.update(&[ScalarValue::Boolean(Some(v))]) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    min_values[i] = None;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            PhysicalType::Int32 => {
+                update_primitive_min_max!(Int32, i32);
+            }
+            PhysicalType::Int64 => {
+                update_primitive_min_max!(Int64, i64);
+            }
+            // 96 bit ints not supported
+            PhysicalType::Int96 => {}
+            PhysicalType::Float => {
+                update_primitive_min_max!(Float32, f32);
+            }
+            PhysicalType::Double => {
+                update_primitive_min_max!(Float64, f64);
+            }
+            PhysicalType::ByteArray => {
+                if let DataType::Utf8 = fields[i].data_type() {
+                    let stats =
+                        stats.as_any().downcast_ref::<ParquetBinaryStatistics>()?;
+                    if let Some(max_value) = &mut max_values[i] {
+                        if let Some(v) = stats.max_value {
+                            match max_value.update(&[ScalarValue::Utf8(
+                                std::str::from_utf8(v).map(|s| s.to_string()).ok(),
+                            )]) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    max_values[i] = None;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(min_value) = &mut min_values[i] {
+                        if let Some(v) = stats.min_value {
+                            match min_value.update(&[ScalarValue::Utf8(
+                                std::str::from_utf8(v).map(|s| s.to_string()).ok(),
+                            )]) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    min_values[i] = None;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            PhysicalType::FixedLenByteArray(_) => {
+                // type not supported yet
+            }
+        }
+
+        Ok(())
     }
 }
 
 impl TableDescriptorBuilder for ParquetTableDescriptor {
     fn file_meta(path: &str) -> Result<FileAndSchema> {
         let file = File::open(path)?;
-        let file_reader = Arc::new(SerializedFileReader::new(file)?);
-        let mut arrow_reader = ParquetFileArrowReader::new(file_reader);
-        let path = path.to_string();
-        let schema = arrow_reader.get_schema()?;
+        let meta_data = read_metadata(&mut std::io::BufReader::new(file))?;
+        let schema = get_schema(&meta_data)?;
         let num_fields = schema.fields().len();
         let fields = schema.fields().to_vec();
-        let meta_data = arrow_reader.get_metadata();
 
         let mut num_rows = 0;
         let mut total_byte_size = 0;
@@ -383,8 +362,8 @@ impl TableDescriptorBuilder for ParquetTableDescriptor {
                         &mut min_values,
                         &fields,
                         i,
-                        stat,
-                    )
+                        stat?,
+                    )?
                 }
             }
         }

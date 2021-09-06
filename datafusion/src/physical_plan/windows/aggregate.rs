@@ -75,8 +75,9 @@ impl AggregateWindowExpr {
         let num_rows = batch.num_rows();
         let partition_points =
             self.evaluate_partition_points(num_rows, &self.partition_columns(batch)?)?;
-        let sort_partition_points =
-            self.evaluate_partition_points(num_rows, &self.sort_columns(batch)?)?;
+        let sort_partition_points = self
+            .evaluate_partition_points(num_rows, &self.sort_columns(batch)?)?
+            .wtf;
         let values = self.evaluate_args(batch)?;
         let results = partition_points
             .iter()
@@ -94,7 +95,9 @@ impl AggregateWindowExpr {
             .flatten()
             .collect::<Vec<ArrayRef>>();
         let results = results.iter().map(|i| i.as_ref()).collect::<Vec<_>>();
-        concat(&results).map_err(DataFusionError::ArrowError)
+        concat::concatenate(&results)
+            .map(|x| ArrayRef::from(x))
+            .map_err(DataFusionError::ArrowError)
     }
 
     fn group_based_evaluate(&self, _batch: &RecordBatch) -> Result<ArrayRef> {
@@ -171,7 +174,7 @@ impl AggregateWindowAccumulator {
         let len = value_range.end - value_range.start;
         let values = values
             .iter()
-            .map(|v| v.slice(value_range.start, len))
+            .map(|v| ArrayRef::from(v.slice(value_range.start, len)))
             .collect::<Vec<_>>();
         self.accumulator.update_batch(&values)?;
         let value = self.accumulator.evaluate()?;

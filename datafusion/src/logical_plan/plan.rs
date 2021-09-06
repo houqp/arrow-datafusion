@@ -36,7 +36,6 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use crate::datasource::TableProvider;
 use crate::sql::parser::FileType;
 
-use super::expr::Expr;
 use super::extension::UserDefinedLogicalNode;
 use super::{
     display::{GraphvizVisitor, IndentVisitor},

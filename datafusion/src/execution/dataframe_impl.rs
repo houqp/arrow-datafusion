@@ -19,7 +19,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::arrow::record_batch::RecordBatch;
+use arrow::io::print
+use arrow::record_batch::RecordBatch;
 use crate::error::Result;
 use crate::execution::context::{ExecutionContext, ExecutionContextState};
 use crate::logical_plan::{
@@ -31,7 +32,6 @@ use crate::{
     physical_plan::{collect, collect_partitioned},
 };
 
-use crate::arrow::util::pretty;
 use crate::physical_plan::{
     execute_stream, execute_stream_partitioned, ExecutionPlan, SendableRecordBatchStream,
 };
@@ -160,13 +160,13 @@ impl DataFrame for DataFrameImpl {
     /// Print results.
     async fn show(&self) -> Result<()> {
         let results = self.collect().await?;
-        Ok(pretty::print_batches(&results)?)
+        Ok(print::print(&results)?)
     }
 
     /// Print results and limit rows.
     async fn show_limit(&self, num: usize) -> Result<()> {
         let results = self.limit(num)?.collect().await?;
-        Ok(pretty::print_batches(&results)?)
+        Ok(print::print(&results)?)
     }
 
     /// Convert the logical plan represented by this DataFrame into a physical plan and

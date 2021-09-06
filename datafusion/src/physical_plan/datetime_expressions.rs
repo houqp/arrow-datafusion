@@ -26,15 +26,15 @@ use crate::{
 use arrow::{
     array::*,
     compute::cast,
-    compute::kernels::cast_utils::string_to_timestamp_nanos,
     datatypes::{
-        ArrowPrimitiveType, DataType, TimestampMicrosecondType, TimestampMillisecondType,
-        TimestampNanosecondType, TimestampSecondType,
+        ArrowPrimitiveType, DataType, TimeUnit, TimestampMicrosecondType,
+        TimestampMillisecondType, TimestampNanosecondType, TimestampSecondType,
     },
+    temporal_conversions::utf8_to_timestamp_ns_scalar,
     types::NativeType,
 };
 use arrow::{compute::temporal, temporal_conversions::timestamp_ns_to_datetime};
-use chrono::prelude::{DateTime, Local, NaiveDateTime, Utc};
+use chrono::prelude::{DateTime, Utc};
 use chrono::Datelike;
 use chrono::Duration;
 
@@ -135,9 +135,9 @@ where
     }
 }
 
-/// Calls string_to_timestamp_nanos and converts the error type
+/// Calls cast::utf8_to_timestamp_ns_scalar and converts the error type
 fn string_to_timestamp_nanos_shim(s: &str) -> Result<i64> {
-    string_to_timestamp_nanos(s).map_err(|e| e.into())
+    utf8_to_timestamp_ns_scalar(s).map_err(|e| e.into())
 }
 
 /// to_timestamp SQL function
@@ -402,8 +402,8 @@ mod tests {
         ];
 
         cases.iter().for_each(|(original, granularity, expected)| {
-            let original = string_to_timestamp_nanos(original).unwrap();
-            let expected = string_to_timestamp_nanos(expected).unwrap();
+            let original = utf8_to_timestamp_ns_scalar(original).unwrap();
+            let expected = utf8_to_timestamp_ns_scalar(expected).unwrap();
             let result = date_trunc_single(granularity, original).unwrap();
             assert_eq!(result, expected);
         });

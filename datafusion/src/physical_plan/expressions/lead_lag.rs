@@ -23,7 +23,7 @@ use crate::physical_plan::window_functions::PartitionEvaluator;
 use crate::physical_plan::{window_functions::BuiltInWindowFunctionExpr, PhysicalExpr};
 use crate::scalar::ScalarValue;
 use arrow::array::ArrayRef;
-use arrow::compute::cast;
+use arrow::compute::cast::cast;
 use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use std::any::Any;
@@ -145,7 +145,7 @@ fn shift_with_default_value(
 
     let value_len = array.len() as i64;
     if offset == 0 {
-        Ok(arrow::array::make_array(array.data_ref().clone()))
+        Ok(array.as_arc())
     } else if offset == i64::MIN || offset.abs() >= value_len {
         create_empty_array(value, array.data_type(), array.len())
     } else {
@@ -158,10 +158,10 @@ fn shift_with_default_value(
         let default_values = create_empty_array(value, slice.data_type(), nulls)?;
         // Concatenate both arrays, add nulls after if shift > 0 else before
         if offset > 0 {
-            concat(&[default_values.as_ref(), slice.as_ref()])
+            concat::concatenate(&[default_values.as_ref(), slice.as_ref()])
                 .map_err(DataFusionError::ArrowError)
         } else {
-            concat(&[slice.as_ref(), default_values.as_ref()])
+            concat::concatenate(&[slice.as_ref(), default_values.as_ref()])
                 .map_err(DataFusionError::ArrowError)
         }
     }
