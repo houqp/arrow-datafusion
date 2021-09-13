@@ -25,7 +25,7 @@ use crate::{
     physical_plan::{display::DisplayableExecutionPlan, Partitioning},
     physical_plan::{DisplayFormatType, ExecutionPlan},
 };
-use arrow::{array::StringBuilder, datatypes::SchemaRef, record_batch::RecordBatch};
+use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use futures::StreamExt;
 
 use super::{stream::RecordBatchReceiverStream, Distribution, SendableRecordBatchStream};

@@ -19,7 +19,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use arrow::io::print
+use arrow::io::print;
 use arrow::record_batch::RecordBatch;
 use crate::error::Result;
 use crate::execution::context::{ExecutionContext, ExecutionContextState};

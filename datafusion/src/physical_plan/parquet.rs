@@ -41,7 +41,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use log::debug;
-use parquet::file::reader::{FileReader, SerializedFileReader};
+
 use parquet::statistics::{
     BinaryStatistics as ParquetBinaryStatistics,
     BooleanStatistics as ParquetBooleanStatistics,
@@ -579,7 +579,7 @@ fn read_partition(
             ParquetFileMetrics::new(partition_index, &*partitioned_file.path, &metrics);
         let mut file = File::open(partitioned_file.path.as_str())?;
         let reader = read::RecordReader::try_new(
-            std::io::BufReader::new(file)
+            std::io::BufReader::new(file),
             Some(projection.to_vec()),
             limit,
             None,

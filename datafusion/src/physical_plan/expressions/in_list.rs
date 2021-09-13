@@ -41,6 +41,17 @@ macro_rules! compare_op_scalar {
     }};
 }
 
+// TODO: primitive array currently doesn't have `values_iter()`, it may
+// worth adding one there, and this specialized case could be removed.
+macro_rules! compare_primitive_op_scalar {
+    ($left: expr, $right:expr, $op:expr) => {{
+        let validity = $left.validity();
+        let values =
+            Bitmap::from_trusted_len_iter($left.values().iter().map(|x| $op(x, $right)));
+        Ok(BooleanArray::from_data(DataType::Boolean, values, validity))
+    }};
+}
+
 /// InList
 #[derive(Debug)]
 pub struct InListExpr {
@@ -162,18 +173,18 @@ macro_rules! make_contains_primitive {
 // whether each value on the left (can be null) is contained in the non-null list
 fn in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
-    values: &[<T as NativeType>],
+    values: &[T],
 ) -> Result<BooleanArray> {
-    compare_op_scalar!(array, values, |x, v: &[<T as NativeType>]| v
+    compare_primitive_op_scalar!(array, values, |x, v| v
         .contains(&x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
 fn not_in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
-    values: &[<T as NativeType>],
+    values: &[T],
 ) -> Result<BooleanArray> {
-    compare_op_scalar!(array, values, |x, v: &[<T as NativeType>]| !v
+    compare_primitive_op_scalar!(array, values, |x, v| !v
         .contains(&x))
 }
 
