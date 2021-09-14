@@ -28,7 +28,7 @@ use crate::physical_plan::hash_utils::create_hashes;
 use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning};
 use arrow::record_batch::RecordBatch;
 use arrow::{
-    array::{Array, UInt64Array},
+    array::{Array, ArrayRef, UInt32Array, UInt64Array, Utf8Array},
     error::Result as ArrowResult,
 };
 use arrow::{compute::take, datatypes::SchemaRef};

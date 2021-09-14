@@ -17,7 +17,7 @@
 
 //! Parquet data source
 
-use std::any::Any;
+use std::any::{Any, type_name};
 use std::fs::File;
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ use crate::datasource::{
     create_max_min_accs, get_col_stats, get_statistics_with_limit, FileAndSchema,
     PartitionedFile, TableDescriptor, TableDescriptorBuilder, TableProvider,
 };
-use crate::error::Result;
+use crate::error::{DataFusionError, Result};
 use crate::logical_plan::{combine_filters, Expr};
 use crate::physical_plan::expressions::{MaxAccumulator, MinAccumulator};
 use crate::physical_plan::parquet::ParquetExec;
@@ -221,7 +221,12 @@ impl ParquetTableDescriptor {
                 if let DataType::$DT = fields[i].data_type() {
                     let stats = stats
                         .as_any()
-                        .downcast_ref::<ParquetPrimitiveStatistics<$PRIMITIVE_TYPE>>()?;
+                        .downcast_ref::<ParquetPrimitiveStatistics<$PRIMITIVE_TYPE>>().ok_or_else(|| {
+                            DataFusionError::Internal(format!(
+                                "Failed to cast stats to {} stats",
+                                type_name::<$PRIMITIVE_TYPE>()
+                            ))
+                        })?;
                     if let Some(max_value) = &mut max_values[i] {
                         if let Some(v) = stats.max_value {
                             match max_value.update(&[ScalarValue::$DT(Some(v))]) {
@@ -250,7 +255,9 @@ impl ParquetTableDescriptor {
             PhysicalType::Boolean => {
                 if let DataType::Boolean = fields[i].data_type() {
                     let stats =
-                        stats.as_any().downcast_ref::<ParquetBooleanStatistics>()?;
+                        stats.as_any().downcast_ref::<ParquetBooleanStatistics>().ok_or_else(|| {
+                            DataFusionError::Internal("Failed to cast stats to boolean stats".to_owned())
+                        })?;
                     if let Some(max_value) = &mut max_values[i] {
                         if let Some(v) = stats.max_value {
                             match max_value.update(&[ScalarValue::Boolean(Some(v))]) {
@@ -290,11 +297,13 @@ impl ParquetTableDescriptor {
             PhysicalType::ByteArray => {
                 if let DataType::Utf8 = fields[i].data_type() {
                     let stats =
-                        stats.as_any().downcast_ref::<ParquetBinaryStatistics>()?;
+                        stats.as_any().downcast_ref::<ParquetBinaryStatistics>().ok_or_else(|| {
+                            DataFusionError::Internal("Failed to cast stats to binary stats".to_owned())
+                        })?;
                     if let Some(max_value) = &mut max_values[i] {
                         if let Some(v) = stats.max_value {
                             match max_value.update(&[ScalarValue::Utf8(
-                                std::str::from_utf8(v).map(|s| s.to_string()).ok(),
+                                std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {
                                 Ok(_) => {}
                                 Err(_) => {
@@ -306,7 +315,7 @@ impl ParquetTableDescriptor {
                     if let Some(min_value) = &mut min_values[i] {
                         if let Some(v) = stats.min_value {
                             match min_value.update(&[ScalarValue::Utf8(
-                                std::str::from_utf8(v).map(|s| s.to_string()).ok(),
+                                std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {
                                 Ok(_) => {}
                                 Err(_) => {
@@ -341,7 +350,7 @@ impl TableDescriptorBuilder for ParquetTableDescriptor {
 
         let (mut max_values, mut min_values) = create_max_min_accs(&schema);
 
-        for row_group_meta in meta_data.row_groups() {
+        for row_group_meta in meta_data.row_groups {
             num_rows += row_group_meta.num_rows();
             total_byte_size += row_group_meta.total_byte_size();
 
@@ -386,7 +395,7 @@ impl TableDescriptorBuilder for ParquetTableDescriptor {
         };
 
         Ok(FileAndSchema {
-            file: PartitionedFile { path, statistics },
+            file: PartitionedFile { path: path.to_owned(), statistics },
             schema,
         })
     }
