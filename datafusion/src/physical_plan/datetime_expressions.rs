@@ -27,8 +27,7 @@ use arrow::{
     array::*,
     compute::cast,
     datatypes::{
-        ArrowPrimitiveType, DataType, TimeUnit, TimestampMicrosecondType,
-        TimestampMillisecondType, TimestampNanosecondType, TimestampSecondType,
+        DataType, TimeUnit,
     },
     temporal_conversions::utf8_to_timestamp_ns_scalar,
     types::NativeType,

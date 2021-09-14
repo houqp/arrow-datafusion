@@ -1703,6 +1703,17 @@ mod tests {
             }};
         }
 
+        macro_rules! make_temporal_test_case {
+            ($INPUT:expr, $ARRAY_TY:ident, $ARROW_TU:ident, $SCALAR_TY:ident) => {{
+                TestCase {
+                    array: Arc::new($ARRAY_TY::from($INPUT)
+                        .to(DataType::Interval(IntervalUnit::$ARROW_TU)),
+                    ),
+                    scalars: $INPUT.iter().map(|v| ScalarValue::$SCALAR_TY(*v)).collect(),
+                }
+            }};
+        }
+
         macro_rules! make_str_test_case {
             ($INPUT:expr, $ARRAY_TY:ident, $SCALAR_TY:ident) => {{
                 TestCase {
@@ -1731,10 +1742,10 @@ mod tests {
 
         /// create a test case for DictionaryArray<$INDEX_TY>
         macro_rules! make_str_dict_test_case {
-            ($INPUT:expr, $INDEX_TY:ident, $SCALAR_TY:ident) => {{
+            ($INPUT:expr, $INDEX_TY:ty, $SCALAR_TY:ident) => {{
                 TestCase {
                     array: Arc::new(
-                        DictionaryArray<$INDEX_TY>::from($INPUT),
+                        DictionaryArray::<$INDEX_TY>::from($INPUT),
                     ),
                     scalars: $INPUT
                         .iter()
@@ -1760,14 +1771,14 @@ mod tests {
             make_str_test_case!(str_vals, LargeStringArray, LargeUtf8),
             make_binary_test_case!(str_vals, SmallBinaryArray, Binary),
             make_binary_test_case!(str_vals, LargeBinaryArray, LargeBinary),
-            make_date_test_case!(&i32_vals, Int32Array, Date32),
-            make_date_test_case!(&i64_vals, Int64Array, Date64),
-            make_ts_test_case!(&i64_vals, Int64Array, Second, TimestampSecond),
-            make_ts_test_case!(&i64_vals, Int64Array, Millisecond, TimestampMillisecond),
-            make_ts_test_case!(&i64_vals, Int64Array, Microsecond, TimestampMicrosecond),
-            make_ts_test_case!(&i64_vals, Int64Array, Nanosecond, TimestampNanosecond),
-            make_temporal_test_case!(i32_vals, Int32Array, IntervalYearMonth),
-            make_temporal_test_case!(days_ms_vals, DaysMsArray, IntervalDayTime),
+            make_date_test_case!(i32_vals, Int32Array, Date32),
+            make_date_test_case!(i64_vals, Int64Array, Date64),
+            make_ts_test_case!(i64_vals, Int64Array, Second, TimestampSecond),
+            make_ts_test_case!(i64_vals, Int64Array, Millisecond, TimestampMillisecond),
+            make_ts_test_case!(i64_vals, Int64Array, Microsecond, TimestampMicrosecond),
+            make_ts_test_case!(i64_vals, Int64Array, Nanosecond, TimestampNanosecond),
+            make_temporal_test_case!(i32_vals, Int32Array, YearMonth, IntervalYearMonth),
+            make_temporal_test_case!(days_ms_vals, DaysMsArray, DayTime, IntervalDayTime),
             make_str_dict_test_case!(str_vals, i8, Utf8),
             make_str_dict_test_case!(str_vals, i16, Utf8),
             make_str_dict_test_case!(str_vals, i32, Utf8),

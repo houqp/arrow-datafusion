@@ -19,7 +19,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use arrow::io::print
+use arrow::io::print;
 use arrow::record_batch::RecordBatch;
 use crate::error::Result;
 use crate::execution::context::{ExecutionContext, ExecutionContextState};
@@ -160,13 +160,13 @@ impl DataFrame for DataFrameImpl {
     /// Print results.
     async fn show(&self) -> Result<()> {
         let results = self.collect().await?;
-        Ok(print::print(&results)?)
+        Ok(print::print(&results))
     }
 
     /// Print results and limit rows.
     async fn show_limit(&self, num: usize) -> Result<()> {
         let results = self.limit(num)?.collect().await?;
-        Ok(print::print(&results)?)
+        Ok(print::print(&results))
     }
 
     /// Convert the logical plan represented by this DataFrame into a physical plan and

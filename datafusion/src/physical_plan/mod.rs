@@ -22,7 +22,7 @@ use self::metrics::MetricsSet;
 use self::{
     coalesce_partitions::CoalescePartitionsExec, display::DisplayableExecutionPlan,
 };
-use crate::expressions::{PhysicalSortExpr, SortColumn};
+use crate::physical_plan::expressions::{PhysicalSortExpr, SortColumn};
 use crate::{
     error::{DataFusionError, Result},
     scalar::ScalarValue,
