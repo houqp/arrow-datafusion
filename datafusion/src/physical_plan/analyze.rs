@@ -29,8 +29,8 @@ use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use futures::StreamExt;
 
 use super::{stream::RecordBatchReceiverStream, Distribution, SendableRecordBatchStream};
-use async_trait::async_trait;
 use arrow::array::MutableUtf8Array;
+use async_trait::async_trait;
 
 /// `EXPLAIN ANALYZE` execution plan operator. This operator runs its input,
 /// discards the results, and then prints out an annotated plan with metrics
@@ -182,10 +182,7 @@ impl ExecutionPlan for AnalyzeExec {
 
             let maybe_batch = RecordBatch::try_new(
                 captured_schema,
-                vec![
-                    type_builder.into_arc(),
-                    plan_builder.into_arc(),
-                ],
+                vec![type_builder.into_arc(), plan_builder.into_arc()],
             );
             // again ignore error
             tx.send(maybe_batch).await.ok();

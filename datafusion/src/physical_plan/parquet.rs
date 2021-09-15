@@ -70,7 +70,7 @@ pub struct ParquetExec {
     pub schema: Arc<Schema>,
     /// Projection for which columns to load
     projection: Vec<usize>,
-        /// Batch size
+    /// Batch size
     batch_size: usize,
     /// Statistics for the data set (sum of statistics for all partitions)
     statistics: Statistics,
