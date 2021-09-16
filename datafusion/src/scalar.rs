@@ -27,10 +27,10 @@ use arrow::{
     types::days_ms,
 };
 use ordered_float::OrderedFloat;
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::convert::{Infallible, TryInto};
 use std::str::FromStr;
-use std::borrow::Borrow;
 
 type StringArray = Utf8Array<i32>;
 type LargeStringArray = Utf8Array<i64>;
@@ -910,9 +910,7 @@ impl ScalarValue {
                     false => {
                         let nested_array = ArrayRef::from(list_array.value(index));
                         let scalar_vec = (0..nested_array.len())
-                            .map(|i| {
-                                ScalarValue::try_from_array(&nested_array, i)
-                            })
+                            .map(|i| ScalarValue::try_from_array(&nested_array, i))
                             .collect::<Result<Vec<_>>>()?;
                         Some(scalar_vec)
                     }
@@ -1740,7 +1738,12 @@ mod tests {
             make_ts_test_case!(&i64_vals, Int64Array, Microsecond, TimestampMicrosecond),
             make_ts_test_case!(&i64_vals, Int64Array, Nanosecond, TimestampNanosecond),
             make_temporal_test_case!(&i32_vals, Int32Array, YearMonth, IntervalYearMonth),
-            make_temporal_test_case!(&days_ms_vals, DaysMsArray, DayTime, IntervalDayTime),
+            make_temporal_test_case!(
+                &days_ms_vals,
+                DaysMsArray,
+                DayTime,
+                IntervalDayTime
+            ),
             make_str_dict_test_case!(str_vals, i8, Utf8),
             make_str_dict_test_case!(str_vals, i16, Utf8),
             make_str_dict_test_case!(str_vals, i32, Utf8),

@@ -19,6 +19,7 @@
 use std::sync::Arc;
 
 use super::ColumnarValue;
+use crate::arrow_temporal_util::string_to_timestamp_nanos;
 use crate::{
     error::{DataFusionError, Result},
     scalar::ScalarValue,
@@ -34,7 +35,6 @@ use chrono::prelude::{DateTime, Utc};
 use chrono::Datelike;
 use chrono::Duration;
 use chrono::Timelike;
-use crate::arrow_temporal_util::string_to_timestamp_nanos;
 
 /// given a function `op` that maps a `&str` to a Result of an arrow native type,
 /// returns a `PrimitiveArray` after the application
