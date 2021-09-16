@@ -310,7 +310,7 @@ impl ParquetTableDescriptor {
                             )
                         })?;
                     if let Some(max_value) = &mut max_values[i] {
-                        if let Some(v) = stats.max_value {
+                        if let Some(v) = &stats.max_value {
                             match max_value.update(&[ScalarValue::Utf8(
                                 std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {
@@ -322,7 +322,7 @@ impl ParquetTableDescriptor {
                         }
                     }
                     if let Some(min_value) = &mut min_values[i] {
-                        if let Some(v) = stats.min_value {
+                        if let Some(v) = &stats.min_value {
                             match min_value.update(&[ScalarValue::Utf8(
                                 std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {

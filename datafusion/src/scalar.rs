@@ -30,6 +30,7 @@ use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 use std::convert::{Infallible, TryInto};
 use std::str::FromStr;
+use std::borrow::Borrow;
 
 type StringArray = Utf8Array<i32>;
 type LargeStringArray = Utf8Array<i64>;
@@ -907,10 +908,10 @@ impl ScalarValue {
                 let value = match list_array.is_null(index) {
                     true => None,
                     false => {
-                        let nested_array = list_array.value(index);
+                        let nested_array = ArrayRef::from(list_array.value(index));
                         let scalar_vec = (0..nested_array.len())
                             .map(|i| {
-                                ScalarValue::try_from_array(&Arc::from(nested_array), i)
+                                ScalarValue::try_from_array(&nested_array, i)
                             })
                             .collect::<Result<Vec<_>>>()?;
                         Some(scalar_vec)
@@ -1732,14 +1733,14 @@ mod tests {
             make_str_test_case!(str_vals, LargeStringArray, LargeUtf8),
             make_binary_test_case!(str_vals, SmallBinaryArray, Binary),
             make_binary_test_case!(str_vals, LargeBinaryArray, LargeBinary),
-            make_date_test_case!(i32_vals, Int32Array, Date32),
-            make_date_test_case!(i64_vals, Int64Array, Date64),
-            make_ts_test_case!(i64_vals, Int64Array, Second, TimestampSecond),
-            make_ts_test_case!(i64_vals, Int64Array, Millisecond, TimestampMillisecond),
-            make_ts_test_case!(i64_vals, Int64Array, Microsecond, TimestampMicrosecond),
-            make_ts_test_case!(i64_vals, Int64Array, Nanosecond, TimestampNanosecond),
-            make_temporal_test_case!(i32_vals, Int32Array, YearMonth, IntervalYearMonth),
-            make_temporal_test_case!(days_ms_vals, DaysMsArray, DayTime, IntervalDayTime),
+            make_date_test_case!(&i32_vals, Int32Array, Date32),
+            make_date_test_case!(&i64_vals, Int64Array, Date64),
+            make_ts_test_case!(&i64_vals, Int64Array, Second, TimestampSecond),
+            make_ts_test_case!(&i64_vals, Int64Array, Millisecond, TimestampMillisecond),
+            make_ts_test_case!(&i64_vals, Int64Array, Microsecond, TimestampMicrosecond),
+            make_ts_test_case!(&i64_vals, Int64Array, Nanosecond, TimestampNanosecond),
+            make_temporal_test_case!(&i32_vals, Int32Array, YearMonth, IntervalYearMonth),
+            make_temporal_test_case!(&days_ms_vals, DaysMsArray, DayTime, IntervalDayTime),
             make_str_dict_test_case!(str_vals, i8, Utf8),
             make_str_dict_test_case!(str_vals, i16, Utf8),
             make_str_dict_test_case!(str_vals, i32, Utf8),

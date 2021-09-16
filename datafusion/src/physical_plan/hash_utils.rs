@@ -681,7 +681,7 @@ mod tests {
         let strings = vec![Some("foo"), None, Some("bar"), Some("foo"), None];
 
         let string_array = Arc::new(strings.iter().cloned().collect::<Utf8Array<i32>>());
-        let dict_array = MutableDictionaryArray::<i8, MutableUtf8Array<i32>>::new();
+        let mut dict_array = MutableDictionaryArray::<i8, MutableUtf8Array<i32>>::new();
         dict_array.try_extend(strings.iter().cloned()).unwrap();
         let dict_array = dict_array.into_arc();
 
@@ -723,7 +723,7 @@ mod tests {
         let strings2 = vec![Some("blarg"), Some("blah"), None];
 
         let string_array = Arc::new(strings1.iter().cloned().collect::<Utf8Array<i32>>());
-        let dict_array = MutableDictionaryArray::<i32, MutableUtf8Array<i32>>::new();
+        let mut dict_array = MutableDictionaryArray::<i32, MutableUtf8Array<i32>>::new();
         dict_array.try_extend(strings2.iter().cloned()).unwrap();
         let dict_array = dict_array.into_arc();
 

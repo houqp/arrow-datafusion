@@ -197,7 +197,7 @@ impl ExecutionPlan for SortPreservingMergeExec {
 /// `SortKeyCursor::compare` can then be used to compare the sort key pointed to
 /// by this row cursor, with that of another `SortKeyCursor`. A cursor stores
 /// a row comparator for each other cursor that it is compared to.
-struct SortKeyCursor<'a> {
+struct SortKeyCursor {
     columns: Vec<ArrayRef>,
     cur_row: usize,
     num_rows: usize,
@@ -209,10 +209,10 @@ struct SortKeyCursor<'a> {
     // A collection of comparators that compare rows in this cursor's batch to
     // the cursors in other batches. Other batches are uniquely identified by
     // their batch_idx.
-    batch_comparators: HashMap<usize, Vec<DynComparator<'a>>>,
+    batch_comparators: HashMap<usize, Vec<DynComparator>>,
 }
 
-impl<'a, 'b> std::fmt::Debug for SortKeyCursor<'b> {
+impl<'a> std::fmt::Debug for SortKeyCursor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SortKeyCursor")
             .field("columns", &self.columns)
@@ -225,7 +225,7 @@ impl<'a, 'b> std::fmt::Debug for SortKeyCursor<'b> {
     }
 }
 
-impl<'a> SortKeyCursor<'a> {
+impl SortKeyCursor {
     fn new(
         batch_idx: usize,
         batch: RecordBatch,
@@ -257,9 +257,9 @@ impl<'a> SortKeyCursor<'a> {
     }
 
     /// Compares the sort key pointed to by this instance's row cursor with that of another
-    fn compare<'b>(
+    fn compare(
         &mut self,
-        other: &SortKeyCursor<'b>,
+        other: &SortKeyCursor,
         options: &[SortOptions],
     ) -> Result<Ordering> {
         if self.columns.len() != other.columns.len() {
@@ -330,7 +330,7 @@ struct RowIndex {
 }
 
 #[derive(Debug)]
-struct SortPreservingMergeStream<'a> {
+struct SortPreservingMergeStream {
     /// The schema of the RecordBatches yielded by this stream
     schema: SchemaRef,
     /// The sorted input streams to merge together
@@ -339,7 +339,7 @@ struct SortPreservingMergeStream<'a> {
     ///
     /// Exhausted cursors will be popped off the front once all
     /// their rows have been yielded to the output
-    cursors: Vec<VecDeque<SortKeyCursor<'a>>>,
+    cursors: Vec<VecDeque<SortKeyCursor>>,
     /// The accumulated row indexes for the next record batch
     in_progress: Vec<RowIndex>,
     /// The physical expressions to sort by
@@ -357,7 +357,7 @@ struct SortPreservingMergeStream<'a> {
     next_batch_index: usize,
 }
 
-impl<'a> SortPreservingMergeStream<'a> {
+impl SortPreservingMergeStream {
     fn new(
         streams: Vec<mpsc::Receiver<ArrowResult<RecordBatch>>>,
         schema: SchemaRef,
@@ -546,7 +546,7 @@ impl<'a> SortPreservingMergeStream<'a> {
     }
 }
 
-impl<'a> Stream for SortPreservingMergeStream<'a> {
+impl Stream for SortPreservingMergeStream {
     type Item = ArrowResult<RecordBatch>;
 
     fn poll_next(
@@ -558,7 +558,7 @@ impl<'a> Stream for SortPreservingMergeStream<'a> {
     }
 }
 
-impl<'a> SortPreservingMergeStream<'a> {
+impl SortPreservingMergeStream {
     #[inline]
     fn poll_next_inner(
         self: &mut Pin<&mut Self>,
@@ -630,7 +630,7 @@ impl<'a> SortPreservingMergeStream<'a> {
     }
 }
 
-impl<'a> RecordBatchStream for SortPreservingMergeStream<'a> {
+impl RecordBatchStream for SortPreservingMergeStream {
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
@@ -1244,7 +1244,7 @@ mod tests {
             Arc::new(Utf8Array::<i32>::from_iter(vec![Some("b"), Some("d")]));
         let b2 = RecordBatch::try_from_iter(vec![("a", a), ("b", b)]).unwrap();
 
-        let schema = b1.schema();
+        let schema = b1.schema().clone();
         let sort = vec![PhysicalSortExpr {
             expr: col("b", &schema).unwrap(),
             options: Default::default(),
