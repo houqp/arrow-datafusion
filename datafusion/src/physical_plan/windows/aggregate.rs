@@ -75,9 +75,8 @@ impl AggregateWindowExpr {
         let num_rows = batch.num_rows();
         let partition_points =
             self.evaluate_partition_points(num_rows, &self.partition_columns(batch)?)?;
-        let sort_partition_points = self
-            .evaluate_partition_points(num_rows, &self.sort_columns(batch)?)?
-            .wtf;
+        let sort_partition_points =
+            self.evaluate_partition_points(num_rows, &self.sort_columns(batch)?)?;
         let values = self.evaluate_args(batch)?;
         let results = partition_points
             .iter()

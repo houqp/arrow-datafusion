@@ -409,17 +409,17 @@ fn group_aggregate_batch(
     }
 
     // Collect all indices + offsets based on keys in this vec
-    let mut batch_indices = MutableBuffer::<i32>::new();
+    let mut batch_indices = MutableBuffer::<u32>::new();
     let mut offsets = vec![0];
     let mut offset_so_far = 0;
     for group_idx in groups_with_rows.iter() {
         let indices = &accumulators.group_states[*group_idx].indices;
-        batch_indices.append_slice(indices)?;
+        batch_indices.extend_from_slice(indices);
         offset_so_far += indices.len();
         offsets.push(offset_so_far);
     }
     let batch_indices =
-        Int32Array::from_data(DataType::Int32, batch_indices.into(), None);
+        UInt32Array::from_data(DataType::UInt32, batch_indices.into(), None);
 
     // `Take` all values based on indices into Arrays
     let values: Vec<Vec<Arc<dyn Array>>> = aggr_input_values
@@ -946,7 +946,8 @@ fn create_batch_from_map(
         .iter()
         .zip(output_schema.fields().iter())
         .map(|(col, desired_field)| {
-            arrow::compute::cast::cast(col, desired_field.data_type())
+            arrow::compute::cast::cast(col.as_ref(), desired_field.data_type())
+                .map(|v| Arc::from(v))
         })
         .collect::<ArrowResult<Vec<_>>>()?;
 

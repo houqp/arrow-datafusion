@@ -594,7 +594,8 @@ pub fn create_hashes<'a>(
 mod tests {
     use std::sync::Arc;
 
-    use arrow::array::DictionaryArray;
+    use arrow::array::TryExtend;
+    use arrow::array::{DictionaryArray, MutableDictionaryArray, MutableUtf8Array};
 
     use super::*;
 
@@ -659,8 +660,8 @@ mod tests {
 
     #[test]
     fn create_hashes_for_float_arrays() -> Result<()> {
-        let f32_arr = Arc::new(Float32Array::from(vec![0.12, 0.5, 1f32, 444.7]));
-        let f64_arr = Arc::new(Float64Array::from(vec![0.12, 0.5, 1f64, 444.7]));
+        let f32_arr = Arc::new(Float32Array::from_slice(&[0.12, 0.5, 1f32, 444.7]));
+        let f64_arr = Arc::new(Float64Array::from_slice(&[0.12, 0.5, 1f64, 444.7]));
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
         let hashes_buff = &mut vec![0; f32_arr.len()];
@@ -680,8 +681,9 @@ mod tests {
         let strings = vec![Some("foo"), None, Some("bar"), Some("foo"), None];
 
         let string_array = Arc::new(strings.iter().cloned().collect::<Utf8Array<i32>>());
-        let dict_array =
-            Arc::new(strings.iter().cloned().collect::<DictionaryArray<i8>>());
+        let dict_array = MutableDictionaryArray::<i8, MutableUtf8Array<i32>>::new();
+        dict_array.try_extend(strings.iter().cloned()).unwrap();
+        let dict_array = dict_array.into_arc();
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
 
@@ -721,8 +723,9 @@ mod tests {
         let strings2 = vec![Some("blarg"), Some("blah"), None];
 
         let string_array = Arc::new(strings1.iter().cloned().collect::<Utf8Array<i32>>());
-        let dict_array =
-            Arc::new(strings2.iter().cloned().collect::<DictionaryArray<i32>>());
+        let dict_array = MutableDictionaryArray::<i32, MutableUtf8Array<i32>>::new();
+        dict_array.try_extend(strings2.iter().cloned()).unwrap();
+        let dict_array = dict_array.into_arc();
 
         let random_state = RandomState::with_seeds(0, 0, 0, 0);
 
