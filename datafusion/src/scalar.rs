@@ -350,36 +350,25 @@ macro_rules! build_timestamp_list {
                         true,
                     ))),
                     $SIZE,
-                ).into();
+                )
+                .into();
                 null_array
             }
             Some(values) => {
                 let values = values.as_ref();
                 match $TIME_UNIT {
-                    TimeUnit::Second => build_values_list!(
-                        Int64Vec,
-                        TimestampSecond,
-                        values,
-                        $SIZE
-                    ),
-                    TimeUnit::Microsecond => build_values_list!(
-                        Int64Vec,
-                        TimestampMillisecond,
-                        values,
-                        $SIZE
-                    ),
-                    TimeUnit::Millisecond => build_values_list!(
-                        Int64Vec,
-                        TimestampMicrosecond,
-                        values,
-                        $SIZE
-                    ),
-                    TimeUnit::Nanosecond => build_values_list!(
-                        Int64Vec,
-                        TimestampNanosecond,
-                        values,
-                        $SIZE
-                    ),
+                    TimeUnit::Second => {
+                        build_values_list!(Int64Vec, TimestampSecond, values, $SIZE)
+                    }
+                    TimeUnit::Microsecond => {
+                        build_values_list!(Int64Vec, TimestampMillisecond, values, $SIZE)
+                    }
+                    TimeUnit::Millisecond => {
+                        build_values_list!(Int64Vec, TimestampMicrosecond, values, $SIZE)
+                    }
+                    TimeUnit::Nanosecond => {
+                        build_values_list!(Int64Vec, TimestampNanosecond, values, $SIZE)
+                    }
                 }
             }
         }
@@ -534,7 +523,7 @@ impl ScalarValue {
     /// Example
     /// ```
     /// use datafusion::scalar::ScalarValue;
-    /// use arrow::array::{ArrayRef, BooleanArray};
+    /// use arrow::array::BooleanArray;
     ///
     /// let scalars = vec![
     ///   ScalarValue::Boolean(Some(true)),
@@ -546,7 +535,7 @@ impl ScalarValue {
     /// let array = ScalarValue::iter_to_array(scalars.into_iter())
     ///   .unwrap();
     ///
-    /// let expected: ArrayRef = std::sync::Arc::new(
+    /// let expected: Box<dyn Array> = Box::new(
     ///   BooleanArray::from(vec![
     ///     Some(true),
     ///     None,
@@ -558,7 +547,7 @@ impl ScalarValue {
     /// ```
     pub fn iter_to_array(
         scalars: impl IntoIterator<Item = ScalarValue>,
-    ) -> Result<ArrayRef> {
+    ) -> Result<Box<dyn Array>> {
         let mut scalars = scalars.into_iter().peekable();
 
         // figure out the type based on the first element
@@ -576,7 +565,7 @@ impl ScalarValue {
         macro_rules! build_array_primitive {
             ($TY:ty, $SCALAR_TY:ident, $DT:ident) => {{
                 {
-                    Arc::new(scalars
+                    Box::new(scalars
                         .map(|sv| {
                             if let ScalarValue::$SCALAR_TY(v) = sv {
                                 Ok(v)
@@ -589,7 +578,7 @@ impl ScalarValue {
                             }
                         })
                         .collect::<Result<PrimitiveArray<$TY>>>()?.to($DT)
-                        ) as ArrayRef
+                        ) as Box<dyn Array>
                 }
             }};
         }
@@ -612,7 +601,7 @@ impl ScalarValue {
                             }
                         })
                         .collect::<Result<$ARRAY_TY>>()?;
-                    Arc::new(array)
+                    Box::new(array)
                 }
             }};
         }
@@ -651,13 +640,13 @@ impl ScalarValue {
                 }
 
                 let array: ListArray<i32> = array.into();
-                Arc::new(array)
+                Box::new(array)
             }}
         }
 
         use DataType::*;
-        let array: ArrayRef = match &data_type {
-            DataType::Boolean => Arc::new(
+        let array: Box<dyn Array> = match &data_type {
+            DataType::Boolean => Box::new(
                 scalars
                     .map(|sv| {
                         if let ScalarValue::Boolean(v) = sv {
@@ -840,7 +829,9 @@ impl ScalarValue {
                 None => new_null_array(self.get_datatype(), size).into(),
             },
             ScalarValue::List(values, data_type) => match data_type.as_ref() {
-                DataType::Boolean => build_list!(MutableBooleanArray, Boolean, values, size),
+                DataType::Boolean => {
+                    build_list!(MutableBooleanArray, Boolean, values, size)
+                }
                 DataType::Int8 => build_list!(Int8Vec, Int8, values, size),
                 DataType::Int16 => build_list!(Int16Vec, Int16, values, size),
                 DataType::Int32 => build_list!(Int32Vec, Int32, values, size),
@@ -855,7 +846,9 @@ impl ScalarValue {
                     build_timestamp_list!(unit.clone(), tz.clone(), values, size)
                 }
                 DataType::Utf8 => build_list!(MutableStringArray, Utf8, values, size),
-                DataType::LargeUtf8 => build_list!(MutableLargeStringArray, LargeUtf8, values, size),
+                DataType::LargeUtf8 => {
+                    build_list!(MutableLargeStringArray, LargeUtf8, values, size)
+                }
                 dt => panic!("Unexpected DataType for list {:?}", dt),
             },
             ScalarValue::Date32(e) => match e {
@@ -1459,7 +1452,7 @@ mod tests {
 
             let array = ScalarValue::iter_to_array(scalars.into_iter()).unwrap();
 
-            let expected: ArrayRef = Arc::new($ARRAYTYPE::from($INPUT));
+            let expected: Box<dyn Array> = Box::new($ARRAYTYPE::from($INPUT));
 
             assert_eq!(&array, &expected);
         }};
@@ -1476,7 +1469,7 @@ mod tests {
 
             let array = ScalarValue::iter_to_array(scalars.into_iter()).unwrap();
 
-            let expected: ArrayRef = Arc::new($ARRAYTYPE::from($INPUT));
+            let expected: Box<dyn Array> = Box::new($ARRAYTYPE::from($INPUT));
 
             assert_eq!(&array, &expected);
         }};
@@ -1496,7 +1489,7 @@ mod tests {
             let expected: $ARRAYTYPE =
                 $INPUT.iter().map(|v| v.map(|v| v.to_vec())).collect();
 
-            let expected: ArrayRef = Arc::new(expected);
+            let expected: Box<dyn Array> = Box::new(expected);
 
             assert_eq!(&array, &expected);
         }};
@@ -1707,7 +1700,10 @@ mod tests {
             ($INPUT:expr, $INDEX_TY:ty, $SCALAR_TY:ident) => {{
                 TestCase {
                     array: {
-                        let mut array = MutableDictionaryArray::<$INDEX_TY, MutableUtf8Array<i32>>::new();
+                        let mut array = MutableDictionaryArray::<
+                            $INDEX_TY,
+                            MutableUtf8Array<i32>,
+                        >::new();
                         array.try_extend(*($INPUT)).unwrap();
                         let array: DictionaryArray<$INDEX_TY> = array.into();
                         Arc::new(array)

@@ -514,7 +514,7 @@ macro_rules! get_min_max_values {
             .collect();
 
         // ignore errors converting to arrays (e.g. different types)
-        ScalarValue::iter_to_array(scalar_values).ok()
+        ScalarValue::iter_to_array(scalar_values).ok().map(|v| Arc::from(v))
     }}
 }
 
@@ -536,7 +536,7 @@ fn build_row_group_predicate(
     predicate_builder: &PruningPredicate,
     metrics: ParquetFileMetrics,
     row_group_metadata: &[RowGroupMetaData],
-) -> Box<dyn Fn(&RowGroupMetaData, usize) -> bool> {
+) -> Box<dyn Fn(usize, &RowGroupMetaData) -> bool> {
     let parquet_schema = predicate_builder.schema().as_ref();
 
     let pruning_stats = RowGroupPruningStatistics {
@@ -550,14 +550,14 @@ fn build_row_group_predicate(
             // NB: false means don't scan row group
             let num_pruned = values.iter().filter(|&v| !*v).count();
             metrics.row_groups_pruned.add(num_pruned);
-            Box::new(move |_, i| values[i])
+            Box::new(move |i, _| values[i])
         }
         // stats filter array could not be built
         // return a closure which will not filter out any row groups
         Err(e) => {
             debug!("Error evaluating row group predicate values {}", e);
             metrics.predicate_evaluation_errors.add(1);
-            Box::new(|_r, _i| true)
+            Box::new(|_i, _r| true)
         }
     }
 }
@@ -591,7 +591,7 @@ fn read_partition(
             reader.set_groups_filter(Arc::new(build_row_group_predicate(
                 predicate_builder,
                 file_metrics,
-                reader.metadata().row_groups,
+                &reader.metadata().row_groups,
             )));
         }
 
