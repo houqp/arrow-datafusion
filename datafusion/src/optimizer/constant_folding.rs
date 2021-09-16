@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use arrow::compute::cast;
 use arrow::datatypes::DataType;
-use arrow::temporal_conversions::utf8_to_timestamp_ns_scalar;
 
+use crate::arrow_temporal_util::string_to_timestamp_nanos;
 use crate::error::Result;
 use crate::execution::context::ExecutionProps;
 use crate::logical_plan::{DFSchemaRef, Expr, ExprRewriter, LogicalPlan, Operator};
@@ -227,7 +227,7 @@ impl<'a> ExprRewriter for ConstantRewriter<'a> {
                 if !args.is_empty() {
                     match &args[0] {
                         Expr::Literal(ScalarValue::Utf8(Some(val))) => {
-                            match utf8_to_timestamp_ns_scalar(val) {
+                            match string_to_timestamp_nanos(val) {
                                 Ok(timestamp) => Expr::Literal(
                                     ScalarValue::TimestampNanosecond(Some(timestamp)),
                                 ),

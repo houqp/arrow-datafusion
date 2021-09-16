@@ -898,7 +898,7 @@ mod tests {
                 options: Default::default(),
             },
         ];
-        let exec = MemoryExec::try_new(partitions, schema, None).unwrap();
+        let exec = MemoryExec::try_new(partitions, schema.clone(), None).unwrap();
         let merge = Arc::new(SortPreservingMergeExec::new(sort, Arc::new(exec), 1024));
 
         let collected = collect(merge).await.unwrap();
