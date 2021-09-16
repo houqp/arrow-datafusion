@@ -175,8 +175,7 @@ fn in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
     values: &[T],
 ) -> Result<BooleanArray> {
-    compare_primitive_op_scalar!(array, values, |x, v| v
-        .contains(&x))
+    compare_primitive_op_scalar!(array, values, |x, v| v.contains(&x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
@@ -184,8 +183,7 @@ fn not_in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
     values: &[T],
 ) -> Result<BooleanArray> {
-    compare_primitive_op_scalar!(array, values, |x, v| !v
-        .contains(&x))
+    compare_primitive_op_scalar!(array, values, |x, v| !v.contains(&x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list

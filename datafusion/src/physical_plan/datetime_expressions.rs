@@ -26,9 +26,7 @@ use crate::{
 use arrow::{
     array::*,
     compute::cast,
-    datatypes::{
-        DataType, TimeUnit,
-    },
+    datatypes::{DataType, TimeUnit},
     temporal_conversions::utf8_to_timestamp_ns_scalar,
     types::NativeType,
 };

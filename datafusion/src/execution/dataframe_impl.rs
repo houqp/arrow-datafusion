@@ -19,8 +19,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use arrow::io::print;
-use arrow::record_batch::RecordBatch;
 use crate::error::Result;
 use crate::execution::context::{ExecutionContext, ExecutionContextState};
 use crate::logical_plan::{
@@ -31,6 +29,8 @@ use crate::{
     dataframe::*,
     physical_plan::{collect, collect_partitioned},
 };
+use arrow::io::print;
+use arrow::record_batch::RecordBatch;
 
 use crate::physical_plan::{
     execute_stream, execute_stream_partitioned, ExecutionPlan, SendableRecordBatchStream,

@@ -17,7 +17,7 @@
 
 //! Parquet data source
 
-use std::any::{Any, type_name};
+use std::any::{type_name, Any};
 use std::fs::File;
 use std::sync::Arc;
 
@@ -221,7 +221,8 @@ impl ParquetTableDescriptor {
                 if let DataType::$DT = fields[i].data_type() {
                     let stats = stats
                         .as_any()
-                        .downcast_ref::<ParquetPrimitiveStatistics<$PRIMITIVE_TYPE>>().ok_or_else(|| {
+                        .downcast_ref::<ParquetPrimitiveStatistics<$PRIMITIVE_TYPE>>()
+                        .ok_or_else(|| {
                             DataFusionError::Internal(format!(
                                 "Failed to cast stats to {} stats",
                                 type_name::<$PRIMITIVE_TYPE>()
@@ -254,9 +255,13 @@ impl ParquetTableDescriptor {
         match stats.physical_type() {
             PhysicalType::Boolean => {
                 if let DataType::Boolean = fields[i].data_type() {
-                    let stats =
-                        stats.as_any().downcast_ref::<ParquetBooleanStatistics>().ok_or_else(|| {
-                            DataFusionError::Internal("Failed to cast stats to boolean stats".to_owned())
+                    let stats = stats
+                        .as_any()
+                        .downcast_ref::<ParquetBooleanStatistics>()
+                        .ok_or_else(|| {
+                            DataFusionError::Internal(
+                                "Failed to cast stats to boolean stats".to_owned(),
+                            )
                         })?;
                     if let Some(max_value) = &mut max_values[i] {
                         if let Some(v) = stats.max_value {
@@ -296,9 +301,13 @@ impl ParquetTableDescriptor {
             }
             PhysicalType::ByteArray => {
                 if let DataType::Utf8 = fields[i].data_type() {
-                    let stats =
-                        stats.as_any().downcast_ref::<ParquetBinaryStatistics>().ok_or_else(|| {
-                            DataFusionError::Internal("Failed to cast stats to binary stats".to_owned())
+                    let stats = stats
+                        .as_any()
+                        .downcast_ref::<ParquetBinaryStatistics>()
+                        .ok_or_else(|| {
+                            DataFusionError::Internal(
+                                "Failed to cast stats to binary stats".to_owned(),
+                            )
                         })?;
                     if let Some(max_value) = &mut max_values[i] {
                         if let Some(v) = stats.max_value {
@@ -395,7 +404,10 @@ impl TableDescriptorBuilder for ParquetTableDescriptor {
         };
 
         Ok(FileAndSchema {
-            file: PartitionedFile { path: path.to_owned(), statistics },
+            file: PartitionedFile {
+                path: path.to_owned(),
+                statistics,
+            },
             schema,
         })
     }
