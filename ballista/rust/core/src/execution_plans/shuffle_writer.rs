@@ -368,21 +368,19 @@ impl ExecutionPlan for ShuffleWriterExec {
         }
 
         // build arrays
-        let partition_num: ArrayRef = Arc::new(partition_builder.finish());
-        let path: ArrayRef = Arc::new(path_builder.finish());
-        let field_builders: Vec<Box<dyn ArrayBuilder>> = vec![
-            Box::new(num_rows_builder),
-            Box::new(num_batches_builder),
-            Box::new(num_bytes_builder),
+        let partition_num: ArrayRef = partition_builder.into_arc();
+        let path: ArrayRef = partition_builder.into_arc();
+        let field_builders: Vec<Arc<dyn Array>> = vec![
+            num_rows_builder.into_arc(),
+            num_batches_builder.into_arc(),
+            num_bytes_builder.into_arc(),
         ];
-        let mut stats_builder = StructBuilder::new(
-            PartitionStats::default().arrow_struct_fields(),
+        let stats_builder = StructArray::from_data(
+            DataType::Struct(PartitionStats::default().arrow_struct_fields()),
             field_builders,
+            None,
         );
-        for _ in 0..num_writers {
-            stats_builder.append(true)?;
-        }
-        let stats = Arc::new(stats_builder.finish());
+        let stats = Arc::new(stats_builder);
 
         // build result batch containing metadata
         let schema = result_schema();
@@ -582,7 +580,7 @@ mod tests {
             schema.clone(),
             vec![
                 Arc::new(UInt32Array::from(vec![Some(1), Some(2)])),
-                Arc::new(StringArray::from(vec![Some("hello"), Some("world")])),
+                Arc::new(Utf8Array::from(vec![Some("hello"), Some("world")])),
             ],
         )?;
         let partition = vec![batch.clone(), batch];
