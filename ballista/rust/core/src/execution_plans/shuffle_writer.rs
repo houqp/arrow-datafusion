@@ -21,7 +21,7 @@
 //! will use the ShuffleReaderExec to read these results.
 
 use std::fs::File;
-use std::iter::Iterator;
+use std::iter::{Iterator, FromIterator};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -54,6 +54,7 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use log::{debug, info};
 use uuid::Uuid;
+use std::cell::RefCell;
 
 /// ShuffleWriterExec represents a section of a query plan that has consistent partitioning and
 /// can be executed as one unit with each partition being executed in parallel. The output of each
@@ -227,16 +228,16 @@ impl ShuffleWriterExec {
                     for (output_partition, partition_indices) in
                         indices.into_iter().enumerate()
                     {
-                        let indices = partition_indices.into();
-
                         // Produce batches based on indices
                         let columns = input_batch
                             .columns()
                             .iter()
                             .map(|c| {
-                                take(c.as_ref(), &indices, None).map_err(|e| {
-                                    DataFusionError::Execution(e.to_string())
-                                })
+                                take::take(c.as_ref(),
+                                           &PrimitiveArray::<u64>::from_slice(&partition_indices))
+                                    .map_err(|e| {
+                                        DataFusionError::Execution(e.to_string())
+                                    }).map(ArrayRef::from)
                             })
                             .collect::<Result<Vec<Arc<dyn Array>>>>()?;
 
@@ -354,7 +355,7 @@ impl ExecutionPlan for ShuffleWriterExec {
         // build metadata result batch
         let num_writers = part_loc.len();
         let mut partition_builder = UInt32Vec::with_capacity(num_writers);
-        let mut path_builder = MutableUtf8Array::with_capacity(num_writers);
+        let mut path_builder = MutableUtf8Array::<i32>::with_capacity(num_writers);
         let mut num_rows_builder = UInt64Vec::with_capacity(num_writers);
         let mut num_batches_builder = UInt64Vec::with_capacity(num_writers);
         let mut num_bytes_builder = UInt64Vec::with_capacity(num_writers);
@@ -369,7 +370,7 @@ impl ExecutionPlan for ShuffleWriterExec {
 
         // build arrays
         let partition_num: ArrayRef = partition_builder.into_arc();
-        let path: ArrayRef = partition_builder.into_arc();
+        let path: ArrayRef = path_builder.into_arc();
         let field_builders: Vec<Arc<dyn Array>> = vec![
             num_rows_builder.into_arc(),
             num_batches_builder.into_arc(),
@@ -457,7 +458,9 @@ impl<'a> ShuffleWriter<'a> {
         let num_bytes: usize = batch
             .columns()
             .iter()
-            .map(|array| array.get_array_memory_size())
+            .map(|_array| 0)
+            // TODO: add arrow2 with array_memory_size capability and enable this.
+            // .map(|array| array.get_array_memory_size())
             .sum();
         self.num_bytes += num_bytes as u64;
         Ok(())
@@ -503,7 +506,7 @@ mod tests {
         assert_eq!(2, batch.num_rows());
         let path = batch.columns()[1]
             .as_any()
-            .downcast_ref::<StringArray>()
+            .downcast_ref::<Utf8Array<i32>>()
             .unwrap();
 
         let file0 = path.value(0);
@@ -580,7 +583,7 @@ mod tests {
             schema.clone(),
             vec![
                 Arc::new(UInt32Array::from(vec![Some(1), Some(2)])),
-                Arc::new(Utf8Array::from(vec![Some("hello"), Some("world")])),
+                Arc::new(Utf8Array::<i32>::from(vec![Some("hello"), Some("world")])),
             ],
         )?;
         let partition = vec![batch.clone(), batch];
