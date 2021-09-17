@@ -19,6 +19,7 @@
 use std::sync::Arc;
 
 use super::ColumnarValue;
+use crate::arrow_temporal_util::string_to_timestamp_nanos;
 use crate::{
     error::{DataFusionError, Result},
     scalar::ScalarValue,
@@ -27,13 +28,13 @@ use arrow::{
     array::*,
     compute::cast,
     datatypes::{DataType, TimeUnit},
-    temporal_conversions::utf8_to_timestamp_ns_scalar,
     types::NativeType,
 };
 use arrow::{compute::temporal, temporal_conversions::timestamp_ns_to_datetime};
 use chrono::prelude::{DateTime, Utc};
 use chrono::Datelike;
 use chrono::Duration;
+use chrono::Timelike;
 
 /// given a function `op` that maps a `&str` to a Result of an arrow native type,
 /// returns a `PrimitiveArray` after the application
@@ -132,9 +133,9 @@ where
     }
 }
 
-/// Calls cast::utf8_to_timestamp_ns_scalar and converts the error type
+/// Calls cast::string_to_timestamp_nanos and converts the error type
 fn string_to_timestamp_nanos_shim(s: &str) -> Result<i64> {
-    utf8_to_timestamp_ns_scalar(s).map_err(|e| e.into())
+    string_to_timestamp_nanos(s).map_err(|e| e.into())
 }
 
 /// to_timestamp SQL function
@@ -399,8 +400,8 @@ mod tests {
         ];
 
         cases.iter().for_each(|(original, granularity, expected)| {
-            let original = utf8_to_timestamp_ns_scalar(original).unwrap();
-            let expected = utf8_to_timestamp_ns_scalar(expected).unwrap();
+            let original = string_to_timestamp_nanos(original).unwrap();
+            let expected = string_to_timestamp_nanos(expected).unwrap();
             let result = date_trunc_single(granularity, original).unwrap();
             assert_eq!(result, expected);
         });

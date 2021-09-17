@@ -37,7 +37,11 @@ macro_rules! compare_op_scalar {
         let validity = $left.validity();
         let values =
             Bitmap::from_trusted_len_iter($left.values_iter().map(|x| $op(x, $right)));
-        Ok(BooleanArray::from_data(DataType::Boolean, values, validity))
+        Ok(BooleanArray::from_data(
+            DataType::Boolean,
+            values,
+            validity.clone(),
+        ))
     }};
 }
 
@@ -48,7 +52,11 @@ macro_rules! compare_primitive_op_scalar {
         let validity = $left.validity();
         let values =
             Bitmap::from_trusted_len_iter($left.values().iter().map(|x| $op(x, $right)));
-        Ok(BooleanArray::from_data(DataType::Boolean, values, validity))
+        Ok(BooleanArray::from_data(
+            DataType::Boolean,
+            values,
+            validity.clone(),
+        ))
     }};
 }
 
@@ -175,7 +183,7 @@ fn in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
     values: &[T],
 ) -> Result<BooleanArray> {
-    compare_primitive_op_scalar!(array, values, |x, v| v.contains(&x))
+    compare_primitive_op_scalar!(array, values, |x, v: &[T]| v.contains(x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list
@@ -183,7 +191,7 @@ fn not_in_list_primitive<T: NativeType>(
     array: &PrimitiveArray<T>,
     values: &[T],
 ) -> Result<BooleanArray> {
-    compare_primitive_op_scalar!(array, values, |x, v| !v.contains(&x))
+    compare_primitive_op_scalar!(array, values, |x, v: &[T]| !v.contains(x))
 }
 
 // whether each value on the left (can be null) is contained in the non-null list

@@ -310,7 +310,7 @@ impl ParquetTableDescriptor {
                             )
                         })?;
                     if let Some(max_value) = &mut max_values[i] {
-                        if let Some(v) = stats.max_value {
+                        if let Some(v) = &stats.max_value {
                             match max_value.update(&[ScalarValue::Utf8(
                                 std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {
@@ -322,7 +322,7 @@ impl ParquetTableDescriptor {
                         }
                     }
                     if let Some(min_value) = &mut min_values[i] {
-                        if let Some(v) = stats.min_value {
+                        if let Some(v) = &stats.min_value {
                             match min_value.update(&[ScalarValue::Utf8(
                                 std::str::from_utf8(&*v).map(|s| s.to_string()).ok(),
                             )]) {
@@ -366,10 +366,10 @@ impl TableDescriptorBuilder for ParquetTableDescriptor {
             let columns_null_counts = row_group_meta
                 .columns()
                 .iter()
-                .flat_map(|c| c.statistics().map(|stats| stats.null_count()));
+                .flat_map(|c| c.statistics().map(|stats| stats.unwrap().null_count()));
 
             for (i, cnt) in columns_null_counts.enumerate() {
-                null_counts[i] += cnt as usize
+                null_counts[i] += cnt.unwrap_or(0) as usize
             }
 
             for (i, column) in row_group_meta.columns().iter().enumerate() {

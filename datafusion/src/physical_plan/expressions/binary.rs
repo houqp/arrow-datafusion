@@ -818,7 +818,7 @@ mod tests {
         apply_arithmetic::<i32>(
             schema,
             vec![a, b],
-            Operator::Modulus,
+            Operator::Modulo,
             Int32Array::from_slice(&[0, 0, 2, 8, 0]),
         )?;
 

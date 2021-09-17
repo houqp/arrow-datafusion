@@ -577,8 +577,8 @@ fn read_partition(
     for partitioned_file in all_files {
         let file_metrics =
             ParquetFileMetrics::new(partition_index, &*partitioned_file.path, &metrics);
-        let mut file = File::open(partitioned_file.path.as_str())?;
-        let reader = read::RecordReader::try_new(
+        let file = File::open(partitioned_file.path.as_str())?;
+        let mut reader = read::RecordReader::try_new(
             std::io::BufReader::new(file),
             Some(projection.to_vec()),
             limit,
