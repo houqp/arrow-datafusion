@@ -21,10 +21,11 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use chrono::Duration;
+use chrono::{Duration, TimeZone};
 
 use arrow::{array::*, datatypes::*, record_batch::RecordBatch};
 
+use datafusion::arrow::io::print;
 use datafusion::assert_batches_eq;
 use datafusion::assert_batches_sorted_eq;
 use datafusion::logical_plan::LogicalPlan;
@@ -1169,7 +1170,7 @@ async fn query_cast_timestamp_millis() -> Result<()> {
     let t1_schema = Arc::new(Schema::new(vec![Field::new("ts", DataType::Int64, true)]));
     let t1_data = RecordBatch::try_new(
         t1_schema.clone(),
-        vec![Arc::new(Int64Array::from(vec![
+        vec![Arc::new(Int64Array::from_values(vec![
             1235865600000,
             1235865660000,
             1238544000000,
@@ -1196,7 +1197,7 @@ async fn query_cast_timestamp_micros() -> Result<()> {
     let t1_schema = Arc::new(Schema::new(vec![Field::new("ts", DataType::Int64, true)]));
     let t1_data = RecordBatch::try_new(
         t1_schema.clone(),
-        vec![Arc::new(Int64Array::from(vec![
+        vec![Arc::new(Int64Array::from_values(vec![
             1235865600000000,
             1235865660000000,
             1238544000000000,
@@ -1223,7 +1224,7 @@ async fn query_cast_timestamp_seconds() -> Result<()> {
     let t1_schema = Arc::new(Schema::new(vec![Field::new("ts", DataType::Int64, true)]));
     let t1_data = RecordBatch::try_new(
         t1_schema.clone(),
-        vec![Arc::new(Int64Array::from(vec![
+        vec![Arc::new(Int64Array::from_values(vec![
             1235865600, 1235865660, 1238544000,
         ]))],
     )?;
@@ -2213,8 +2214,8 @@ fn create_join_context_unbalanced(
     let t1_data = RecordBatch::try_new(
         t1_schema.clone(),
         vec![
-            Arc::new(UInt32Array::from(vec![11, 22, 33, 44, 77])),
-            Arc::new(StringArray::from(vec![
+            Arc::new(UInt32Array::from_values(vec![11, 22, 33, 44, 77])),
+            Arc::new(Utf8Array::<i32>::from(vec![
                 Some("a"),
                 Some("b"),
                 Some("c"),
@@ -2233,8 +2234,8 @@ fn create_join_context_unbalanced(
     let t2_data = RecordBatch::try_new(
         t2_schema.clone(),
         vec![
-            Arc::new(UInt32Array::from(vec![11, 22, 44, 55])),
-            Arc::new(StringArray::from(vec![
+            Arc::new(UInt32Array::from_values(vec![11, 22, 44, 55])),
+            Arc::new(Utf8Array::<i32>::from(vec![
                 Some("z"),
                 Some("y"),
                 Some("x"),
@@ -2288,7 +2289,7 @@ async fn csv_explain_analyze() {
     register_aggregate_csv_by_sql(&mut ctx).await;
     let sql = "EXPLAIN ANALYZE SELECT count(*), c1 FROM aggregate_test_100 group by c1";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let formatted = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let formatted = print::write(&actual);
     let formatted = normalize_for_explain(&formatted);
 
     // Only test basic plumbing and try to avoid having to change too
@@ -2309,7 +2310,7 @@ async fn csv_explain_analyze_verbose() {
     let sql =
         "EXPLAIN ANALYZE VERBOSE SELECT count(*), c1 FROM aggregate_test_100 group by c1";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let formatted = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let formatted = print::write(&actual);
     let formatted = normalize_for_explain(&formatted);
 
     let verbose_needle = "Output Rows";
@@ -2354,7 +2355,7 @@ async fn explain_analyze_baseline_metrics() {
     let plan = ctx.optimize(&plan).unwrap();
     let physical_plan = ctx.create_physical_plan(&plan).unwrap();
     let results = collect(physical_plan.clone()).await.unwrap();
-    let formatted = arrow::util::pretty::pretty_format_batches(&results).unwrap();
+    let formatted = print::write(&results);
     println!("Query Output:\n\n{}", formatted);
     let formatted = normalize_for_explain(&formatted);
 
@@ -2842,13 +2843,13 @@ async fn explain_analyze_runs_optimizers() {
 
     let sql = "EXPLAIN SELECT count(*) from alltypes_plain";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let actual = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let actual = print::write(&actual);
     assert_contains!(actual, expected);
 
     // EXPLAIN ANALYZE should work the same
     let sql = "EXPLAIN  ANALYZE SELECT count(*) from alltypes_plain";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let actual = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let actual = print::write(&actual);
     assert_contains!(actual, expected);
 }
 
@@ -3420,7 +3421,7 @@ async fn query_group_on_null_multi_col() -> Result<()> {
                 None,
                 Some(3),
             ])),
-            Arc::new(StringArray::from(vec![
+            Arc::new(Utf8Array::<i32>::from(vec![
                 None,
                 None,
                 Some("foo"),

@@ -39,8 +39,8 @@ fn create_context() -> Result<ExecutionContext> {
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
-            Arc::new(Float32Array::from(vec![2.1, 3.1, 4.1, 5.1])),
-            Arc::new(Float64Array::from(vec![1.0, 2.0, 3.0, 4.0])),
+            Arc::new(Float32Array::from_values(vec![2.1, 3.1, 4.1, 5.1])),
+            Arc::new(Float64Array::from_values(vec![1.0, 2.0, 3.0, 4.0])),
         ],
     )?;
 

@@ -19,17 +19,15 @@
 // data into a parquet file and then
 use std::sync::Arc;
 
+use arrow::array::PrimitiveArray;
+use arrow::datatypes::TimeUnit;
 use arrow::{
-    array::{
-        Array, ArrayRef, Date32Array, Date64Array, Float64Array, Int32Array, StringArray,
-        TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-        TimestampSecondArray,
-    },
+    array::{Array, ArrayRef, Float64Array, Int32Array, Utf8Array},
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
-    util::pretty::pretty_format_batches,
 };
 use chrono::{Datelike, Duration};
+use datafusion::arrow::io::print;
 use datafusion::{
     datasource::TableProvider,
     logical_plan::{col, lit, Expr, LogicalPlan, LogicalPlanBuilder},
@@ -40,7 +38,6 @@ use datafusion::{
     prelude::{ExecutionConfig, ExecutionContext},
     scalar::ScalarValue,
 };
-use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
 use tempfile::NamedTempFile;
 
 #[tokio::test]
@@ -527,7 +524,7 @@ impl ContextWithParquet {
             .collect()
             .await
             .expect("getting input");
-        let pretty_input = pretty_format_batches(&input).unwrap();
+        let pretty_input = print::write(&input);
 
         let logical_plan = self.ctx.optimize(&logical_plan).expect("optimizing plan");
         let physical_plan = self
@@ -562,7 +559,7 @@ impl ContextWithParquet {
 
         let result_rows = results.iter().map(|b| b.num_rows()).sum();
 
-        let pretty_results = pretty_format_batches(&results).unwrap();
+        let pretty_results = print::write(&results);
 
         let sql = sql.into();
         TestOutput {
@@ -695,13 +692,17 @@ fn make_timestamp_batch(offset: Duration) -> RecordBatch {
         .map(|(i, _)| format!("Row {} + {}", i, offset))
         .collect::<Vec<_>>();
 
-    let arr_nanos = TimestampNanosecondArray::from_opt_vec(ts_nanos, None);
-    let arr_micros = TimestampMicrosecondArray::from_opt_vec(ts_micros, None);
-    let arr_millis = TimestampMillisecondArray::from_opt_vec(ts_millis, None);
-    let arr_seconds = TimestampSecondArray::from_opt_vec(ts_seconds, None);
+    let arr_nanos = PrimitiveArray::<i64>::from(ts_nanos)
+        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+    let arr_micros = PrimitiveArray::<i64>::from(ts_micros)
+        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+    let arr_millis = PrimitiveArray::<i64>::from(ts_millis)
+        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+    let arr_seconds = PrimitiveArray::<i64>::from(ts_seconds)
+        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
 
     let names = names.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    let arr_names = StringArray::from(names);
+    let arr_names = Utf8Array::<i32>::from_slice(names);
 
     let schema = Schema::new(vec![
         Field::new("nanos", arr_nanos.data_type().clone(), true),
@@ -732,7 +733,7 @@ fn make_timestamp_batch(offset: Duration) -> RecordBatch {
 fn make_int32_batch(start: i32, end: i32) -> RecordBatch {
     let schema = Arc::new(Schema::new(vec![Field::new("i", DataType::Int32, true)]));
     let v: Vec<i32> = (start..end).collect();
-    let array = Arc::new(Int32Array::from(v)) as ArrayRef;
+    let array = Arc::new(Int32Array::from_values(v)) as ArrayRef;
     RecordBatch::try_new(schema, vec![array.clone()]).unwrap()
 }
 
@@ -742,7 +743,7 @@ fn make_int32_batch(start: i32, end: i32) -> RecordBatch {
 /// "f" -> Float64Array
 fn make_f64_batch(v: Vec<f64>) -> RecordBatch {
     let schema = Arc::new(Schema::new(vec![Field::new("f", DataType::Float64, true)]));
-    let array = Arc::new(Float64Array::from(v)) as ArrayRef;
+    let array = Arc::new(Float64Array::from_values(v)) as ArrayRef;
     RecordBatch::try_new(schema, vec![array.clone()]).unwrap()
 }
 
@@ -801,7 +802,7 @@ fn make_date_batch(offset: Duration) -> RecordBatch {
     let arr_date64 = Date64Array::from(date_millis);
 
     let names = names.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    let arr_names = StringArray::from(names);
+    let arr_names = Utf8Array::<i32>::from_slice(names);
 
     let schema = Schema::new(vec![
         Field::new("date32", arr_date32.data_type().clone(), true),
