@@ -22,7 +22,7 @@ use std::sync::Arc;
 use arrow::array::PrimitiveArray;
 use arrow::datatypes::TimeUnit;
 use arrow::{
-    array::{Array, ArrayRef, Float64Array, Int32Array, Utf8Array},
+    array::{Array, ArrayRef, Float64Array, Int32Array, Int64Array, Utf8Array},
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
@@ -39,6 +39,7 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use tempfile::NamedTempFile;
+use arrow::io::parquet::write::{WriteOptions, Version, to_parquet_schema, Encoding, array_to_pages, DynIter, write_file, Compression};
 
 #[tokio::test]
 async fn prune_timestamps_nanos() {
@@ -580,10 +581,6 @@ async fn make_test_file(scenario: Scenario) -> NamedTempFile {
         .tempfile()
         .expect("tempfile creation");
 
-    let props = WriterProperties::builder()
-        .set_max_row_group_size(5)
-        .build();
-
     let batches = match scenario {
         Scenario::Timestamps => {
             vec![
@@ -621,20 +618,41 @@ async fn make_test_file(scenario: Scenario) -> NamedTempFile {
 
     let schema = batches[0].schema();
 
-    let mut writer = ArrowWriter::try_new(
-        output_file
-            .as_file()
-            .try_clone()
-            .expect("cloning file descriptor"),
-        schema,
-        Some(props),
-    )
-    .unwrap();
+    let options = WriteOptions {
+        compression: Compression::Uncompressed,
+        write_statistics: false,
+        version: Version::V1,
+    };
+    let parquet_schema = to_parquet_schema(schema.as_ref()).unwrap();
+    let descritors = parquet_schema.columns().to_vec().into_iter();
 
-    for batch in batches {
-        writer.write(&batch).expect("writing batch");
-    }
-    writer.close().unwrap();
+    let row_groups = batches.iter().map(|batch| {
+        let iterator = batch
+            .columns()
+            .iter()
+            .zip(descritors.clone())
+            .map(|(array, type_)| {
+                let encoding = if let DataType::Dictionary(_, _) = array.data_type() {
+                    Encoding::RleDictionary
+                } else {
+                    Encoding::Plain
+                };
+                array_to_pages(array.clone(), type_, options, encoding)
+            });
+        let iterator = DynIter::new(iterator);
+        Ok(iterator)
+    });
+
+    let mut writer = output_file.as_file();
+
+    write_file(
+        &mut writer,
+        row_groups,
+        schema,
+        parquet_schema,
+        options,
+        None,
+    ).unwrap();
 
     output_file
 }
@@ -798,8 +816,8 @@ fn make_date_batch(offset: Duration) -> RecordBatch {
         })
         .collect::<Vec<_>>();
 
-    let arr_date32 = Date32Array::from(date_seconds);
-    let arr_date64 = Date64Array::from(date_millis);
+    let arr_date32 = Int32Array::from(date_seconds).to(DataType::Date32);
+    let arr_date64 = Int64Array::from(date_millis).to(DataType::Date64);
 
     let names = names.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let arr_names = Utf8Array::<i32>::from_slice(names);

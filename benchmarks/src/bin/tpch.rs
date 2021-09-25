@@ -25,12 +25,6 @@ use std::{
     time::Instant,
 };
 
-use futures::StreamExt;
-
-//use ballista::context::BallistaContext;
-use ballista::prelude::{BallistaConfig, BALLISTA_DEFAULT_SHUFFLE_PARTITIONS};
-
-use datafusion::arrow::array;
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::io::print;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -589,7 +583,7 @@ mod tests {
     use std::env;
     use std::sync::Arc;
 
-    use arrow::array::display::get_value_display;
+    use arrow::array::get_display;
     use datafusion::arrow::array::*;
     use datafusion::logical_plan::Expr;
     use datafusion::logical_plan::Expr::Cast;
@@ -785,7 +779,7 @@ mod tests {
             return format!("[{}]", r.join(","));
         }
 
-        get_value_display(column)(row_index)
+        get_display(column)(row_index)
     }
 
     /// Converts the results into a 2d array of strings, `result[row][column]`
@@ -797,7 +791,7 @@ mod tests {
                 let row_vec = batch
                     .columns()
                     .iter()
-                    .map(|column| col_str(column, row_index))
+                    .map(|column| col_str(column.as_ref(), row_index))
                     .collect();
                 result.push(row_vec);
             }

@@ -24,6 +24,7 @@ use datafusion::arrow::{
 use datafusion::prelude::*;
 use datafusion::{error::Result, physical_plan::functions::make_scalar_function};
 use std::sync::Arc;
+use arrow::array::Array;
 
 // create local execution context with an in-memory table
 fn create_context() -> Result<ExecutionContext> {
@@ -88,7 +89,7 @@ async fn main() -> Result<()> {
                 match (base, exponent) {
                     // in arrow, any value can be null.
                     // Here we decide to make our UDF to return null when either base or exponent is null.
-                    (Some(base), Some(exponent)) => Some(base.powf(exponent)),
+                    (Some(base), Some(exponent)) => Some(base.powf(*exponent)),
                     _ => None,
                 }
             })
