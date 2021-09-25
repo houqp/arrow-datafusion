@@ -24,6 +24,7 @@ use arrow::datatypes::TimeUnit;
 use arrow::{
     array::{Array, ArrayRef, Float64Array, Int32Array, Int64Array, Utf8Array},
     datatypes::{DataType, Field, Schema},
+    io::parquet::write::{WriteOptions, Version, to_parquet_schema, Encoding, array_to_pages, DynIter, write_file, Compression},
     record_batch::RecordBatch,
 };
 use chrono::{Datelike, Duration};
@@ -39,7 +40,6 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use tempfile::NamedTempFile;
-use arrow::io::parquet::write::{WriteOptions, Version, to_parquet_schema, Encoding, array_to_pages, DynIter, write_file, Compression};
 
 #[tokio::test]
 async fn prune_timestamps_nanos() {
@@ -617,10 +617,11 @@ async fn make_test_file(scenario: Scenario) -> NamedTempFile {
     };
 
     let schema = batches[0].schema();
+    eprintln!("----------- schema {:?}", schema);
 
     let options = WriteOptions {
         compression: Compression::Uncompressed,
-        write_statistics: false,
+        write_statistics: true,
         version: Version::V1,
     };
     let parquet_schema = to_parquet_schema(schema.as_ref()).unwrap();
@@ -713,11 +714,11 @@ fn make_timestamp_batch(offset: Duration) -> RecordBatch {
     let arr_nanos = PrimitiveArray::<i64>::from(ts_nanos)
         .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
     let arr_micros = PrimitiveArray::<i64>::from(ts_micros)
-        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+        .to(DataType::Timestamp(TimeUnit::Microsecond, None));
     let arr_millis = PrimitiveArray::<i64>::from(ts_millis)
-        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+        .to(DataType::Timestamp(TimeUnit::Millisecond, None));
     let arr_seconds = PrimitiveArray::<i64>::from(ts_seconds)
-        .to(DataType::Timestamp(TimeUnit::Nanosecond, None));
+        .to(DataType::Timestamp(TimeUnit::Second, None));
 
     let names = names.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let arr_names = Utf8Array::<i32>::from_slice(names);
