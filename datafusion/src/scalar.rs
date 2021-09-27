@@ -864,7 +864,7 @@ impl ScalarValue {
                 DataType::Float32 => build_list!(Float32Vec, Float32, values, size),
                 DataType::Float64 => build_list!(Float64Vec, Float64, values, size),
                 DataType::Timestamp(unit, tz) => {
-                    build_timestamp_list!(unit.clone(), tz.clone(), values, size)
+                    build_timestamp_list!(*unit, tz.clone(), values, size)
                 }
                 DataType::Utf8 => build_list!(MutableStringArray, Utf8, values, size),
                 DataType::LargeUtf8 => {
