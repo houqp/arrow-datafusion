@@ -233,7 +233,7 @@ pub async fn pruned_partition_list(
             .try_collect()
             .await?;
 
-        let mem_table = MemTable::try_new(batches[0].schema(), vec![batches])?;
+        let mem_table = MemTable::try_new(batches[0].schema().clone(), vec![batches])?;
 
         // Filter the partitions using a local datafusion context
         // TODO having the external context would allow us to resolve `Volatility::Stable`
@@ -263,23 +263,23 @@ fn paths_to_batch(
     table_path: &str,
     metas: &[FileMeta],
 ) -> Result<RecordBatch> {
-    let mut key_builder = MutableUtf8Array::with_capacity(metas.len());
+    let mut key_builder = MutableUtf8Array::<i32>::with_capacity(metas.len());
     let mut length_builder = MutablePrimitiveArray::<u64>::with_capacity(metas.len());
     let mut modified_builder = MutablePrimitiveArray::<i64>::with_capacity(metas.len());
     let mut partition_builders = table_partition_cols
         .iter()
-        .map(|_| MutableUtf8Array::with_capacity(metas.len()))
+        .map(|_| MutableUtf8Array::<i32>::with_capacity(metas.len()))
         .collect::<Vec<_>>();
     for file_meta in metas {
         if let Some(partition_values) =
             parse_partitions_for_path(table_path, file_meta.path(), table_partition_cols)
         {
-            key_builder.push(Some(file_meta.path()))?;
-            length_builder.push(Some(file_meta.size()))?;
+            key_builder.push(Some(file_meta.path()));
+            length_builder.push(Some(file_meta.size()));
             modified_builder
                 .push(file_meta.last_modified.map(|lm| lm.timestamp_millis()));
             for (i, part_val) in partition_values.iter().enumerate() {
-                partition_builders[i].push(Some(part_val))?;
+                partition_builders[i].push(Some(part_val));
             }
         } else {
             debug!("No partitioning for path {}", file_meta.path());
@@ -290,7 +290,7 @@ fn paths_to_batch(
     let mut col_arrays: Vec<Arc<dyn Array>> = vec![
         key_builder.into_arc(),
         length_builder.into_arc(),
-        modified_builder.into_arc().to(DataType::Date64),
+        modified_builder.to(DataType::Date64).into_arc(),
     ];
     for mut partition_builder in partition_builders {
         col_arrays.push(partition_builder.into_arc());

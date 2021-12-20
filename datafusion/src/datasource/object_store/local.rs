@@ -24,9 +24,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{stream, AsyncRead, StreamExt};
 
-use crate::datasource::object_store::{
-    FileMeta, FileMetaStream, ListEntryStream, ObjectReader, ObjectStore,
-};
+use crate::datasource::object_store::{FileMeta, FileMetaStream, ListEntryStream, ObjectReader, ObjectStore, ReadSeek};
 use crate::datasource::PartitionedFile;
 use crate::error::DataFusionError;
 use crate::error::Result;
@@ -82,7 +80,7 @@ impl ObjectReader for LocalFileReader {
         &self,
         start: u64,
         length: usize,
-    ) -> Result<Box<dyn Read + Send + Sync>> {
+    ) -> Result<Box<dyn ReadSeek + Send + Sync>> {
         // A new file descriptor is opened for each chunk reader.
         // This okay because chunks are usually fairly large.
         let mut file = File::open(&self.file.path)?;

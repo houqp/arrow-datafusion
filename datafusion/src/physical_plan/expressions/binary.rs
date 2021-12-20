@@ -32,6 +32,7 @@ use super::coercion::{
     eq_coercion, like_coercion, numerical_coercion, order_coercion, string_coercion,
 };
 use arrow::scalar::Scalar;
+use arrow::types::NativeType;
 
 /// Binary expression
 #[derive(Debug)]
@@ -542,23 +543,9 @@ impl PhysicalExpr for BinaryExpr {
     }
 }
 
-fn is_distinct_from<T>(
+fn is_distinct_from<T: NativeType>(
     left: &PrimitiveArray<T>,
     right: &PrimitiveArray<T>,
-) -> Result<BooleanArray>
-where
-    T: ArrowNumericType,
-{
-    Ok(left
-        .iter()
-        .zip(right.iter())
-        .map(|(x, y)| Some(x != y))
-        .collect())
-}
-
-fn is_distinct_from_utf8<T: Offset>(
-    left: &Utf8Array<T>,
-    right: &Utf8Array<T>,
 ) -> Result<BooleanArray> {
     Ok(left
         .iter()
@@ -567,23 +554,9 @@ fn is_distinct_from_utf8<T: Offset>(
         .collect())
 }
 
-fn is_not_distinct_from<T>(
+fn is_not_distinct_from<T: NativeType>(
     left: &PrimitiveArray<T>,
     right: &PrimitiveArray<T>,
-) -> Result<BooleanArray>
-where
-    T: ArrowNumericType,
-{
-    Ok(left
-        .iter()
-        .zip(right.iter())
-        .map(|(x, y)| Some(x == y))
-        .collect())
-}
-
-fn is_not_distinct_from_utf8<T: Offset>(
-    left: &Utf8Array<T>,
-    right: &Utf8Array<T>,
 ) -> Result<BooleanArray> {
     Ok(left
         .iter()

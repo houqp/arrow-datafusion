@@ -492,26 +492,8 @@ mod tests {
     use datafusion::physical_plan::expressions::Column;
     use datafusion::physical_plan::limit::GlobalLimitExec;
     use datafusion::physical_plan::memory::MemoryExec;
-    use std::borrow::Borrow;
+    use datafusion::field_util::StructArrayExt;
     use tempfile::TempDir;
-
-    pub trait StructArrayExt {
-        fn column_names(&self) -> Vec<&str>;
-        fn column_by_name(&self, column_name: &str) -> Option<&ArrayRef>;
-    }
-
-    impl StructArrayExt for StructArray {
-        fn column_names(&self) -> Vec<&str> {
-            self.fields().iter().map(|f| f.name.as_str()).collect()
-        }
-
-        fn column_by_name(&self, column_name: &str) -> Option<&ArrayRef> {
-            self.fields()
-                .iter()
-                .position(|c| c.name() == column_name)
-                .map(|pos| self.values()[pos].borrow())
-        }
-    }
 
     #[tokio::test]
     async fn test() -> Result<()> {

@@ -31,7 +31,7 @@ use crate::scalar::ScalarValue;
 use crate::{
     error::DataFusionError,
     error::Result,
-    field_util::get_indexed_field as get_data_type_field,
+    field_util::{get_indexed_field as get_data_type_field, StructArrayExt},
     physical_plan::{ColumnarValue, PhysicalExpr},
 };
 use arrow::array::{ListArray, StructArray};
@@ -87,7 +87,7 @@ impl PhysicalExpr for GetIndexedFieldExpr {
                 }
                 (DataType::List(_), ScalarValue::Int64(Some(i))) => {
                     let as_list_array =
-                        array.as_any().downcast_ref::<ListArray>().unwrap();
+                        array.as_any().downcast_ref::<ListArray<i64>>().unwrap();
                     if as_list_array.is_empty() {
                         let scalar_null: ScalarValue = array.data_type().try_into()?;
                         return Ok(ColumnarValue::Scalar(scalar_null))
@@ -98,7 +98,7 @@ impl PhysicalExpr for GetIndexedFieldExpr {
                         .collect();
                     let vec = sliced_array.iter().map(|a| a.as_ref()).collect::<Vec<&dyn Array>>();
                     let iter = concatenate(vec.as_slice()).unwrap();
-                    Ok(ColumnarValue::Array(iter))
+                    Ok(ColumnarValue::Array(iter.into()))
                 }
                 (DataType::Struct(_), ScalarValue::Utf8(Some(k))) => {
                     let as_struct_array = array.as_any().downcast_ref::<StructArray>().unwrap();

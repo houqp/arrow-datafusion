@@ -437,7 +437,7 @@ impl ConstEvaluator {
         let schema = Schema::new(vec![Field::new(DUMMY_COL_NAME, DataType::Null, true)]);
 
         // Need a single "input" row to produce a single output row
-        let col = new_null_array(&DataType::Null, 1);
+        let col = new_null_array(DataType::Null, 1).into();
         let input_batch =
             RecordBatch::try_new(std::sync::Arc::new(schema), vec![col]).unwrap();
 

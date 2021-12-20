@@ -81,7 +81,11 @@ where
 // given an function that maps a `&str` to a arrow native type,
 // returns a `ColumnarValue` where the function is applied to either a `ArrayRef` or `ScalarValue`
 // depending on the `args`'s variant.
-fn handle<'a, O, F>(args: &'a [ColumnarValue], op: F, name: &str) -> Result<ColumnarValue>
+fn handle<'a, O, F>(
+    args: &'a [ColumnarValue],
+    op: F,
+    name: &str,
+    data_type: DataType) -> Result<ColumnarValue>
 where
     O: NativeType,
     ScalarValue: From<Option<O>>,

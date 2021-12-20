@@ -34,7 +34,7 @@ type LargeStringArray = Utf8Array<i64>;
 
 use super::format_state_name;
 use crate::arrow::array::Array;
-use arrow::array::DecimalArray;
+use arrow::array::Int128Array;
 
 // Min/max aggregation can take Dictionary encode input but always produces unpacked
 // (aka non Dictionary) output. We need to adjust the output data type to reflect this.
@@ -136,7 +136,7 @@ macro_rules! typed_min_max_batch_decimal128 {
         if null_count == $VALUES.len() {
             ScalarValue::Decimal128(None, *$PRECISION, *$SCALE)
         } else {
-            let array = $VALUES.as_any().downcast_ref::<DecimalArray>().unwrap();
+            let array = $VALUES.as_any().downcast_ref::<Int128Array>().unwrap();
             if null_count == 0 {
                 // there is no null value
                 let mut result = array.value(0);

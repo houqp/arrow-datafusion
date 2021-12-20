@@ -18,7 +18,6 @@
 //! Parquet format abstractions
 
 use std::any::{type_name, Any};
-use std::io::Read;
 use std::sync::Arc;
 
 use arrow::datatypes::Schema;
@@ -257,15 +256,15 @@ fn summarize_min_max(
 
 /// Read and parse the schema of the Parquet file at location `path`
 fn fetch_schema(object_reader: Arc<dyn ObjectReader>) -> Result<Schema> {
-    let reader = std::io::BufReader::new(object_reader.sync_reader())?;
-    let meta_data = read_metadata(&mut std::io::BufReader::new(reader))?;
+    let mut reader = object_reader.sync_reader()?;
+    let meta_data = read_metadata(&mut reader)?;
     let schema = get_schema(&meta_data)?;
     Ok(schema)
 }
 
 /// Read and parse the statistics of the Parquet file at location `path`
 fn fetch_statistics(object_reader: Arc<dyn ObjectReader>) -> Result<Statistics> {
-    let reader = std::io::BufReader::new(object_reader.sync_reader())?;
+    let mut reader = object_reader.sync_reader()?;
     let meta_data = read_metadata(&mut reader)?;
     let schema = get_schema(&meta_data)?;
 

@@ -46,7 +46,6 @@ use crate::{
 };
 use crate::{
     execution::context::ExecutionContextState,
-    physical_plan::array_expressions::SUPPORTED_ARRAY_TYPES,
 };
 use arrow::{
     array::*,

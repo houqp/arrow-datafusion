@@ -425,8 +425,7 @@ fn read_partition(
     limit: Option<usize>,
     mut partition_column_projector: PartitionColumnProjector,
 ) -> Result<()> {
-    let mut total_rows = 0;
-    'outer: for partitioned_file in partition {
+    for partitioned_file in partition {
         let file_metrics = ParquetFileMetrics::new(
             partition_index,
             &*partitioned_file.file_meta.path(),
@@ -452,7 +451,7 @@ fn read_partition(
 
         for batch in record_reader {
             let proj_batch = partition_column_projector
-                .project(batch, &partitioned_file.partition_values);
+                .project(batch?, &partitioned_file.partition_values);
             response_tx
                 .blocking_send(proj_batch)
                 .map_err(|x| DataFusionError::Execution(format!("{}", x)))?;

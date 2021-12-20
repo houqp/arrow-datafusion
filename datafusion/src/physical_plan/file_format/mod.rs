@@ -25,8 +25,7 @@ mod parquet;
 
 pub use self::parquet::ParquetExec;
 use arrow::{
-    array::{ArrayRef, DictionaryArray, DictionaryKey, PrimitiveArray},
-    buffer::Buffer,
+    array::{ArrayRef, DictionaryArray},
     datatypes::{DataType, Field, Schema, SchemaRef},
     error::{ArrowError, Result as ArrowResult},
     record_batch::RecordBatch,
@@ -47,6 +46,7 @@ use std::{
     sync::Arc,
     vec,
 };
+use arrow::array::UInt8Array;
 
 use super::{ColumnStatistics, Statistics};
 
@@ -178,7 +178,7 @@ struct PartitionColumnProjector {
     /// An Arrow buffer initialized to zeros that represents the key array of all partition
     /// columns (partition columns are materialized by dictionary arrays with only one
     /// value in the dictionary, thus all the keys are equal to zero).
-    key_buffer_cache: Option<Buffer>,
+    key_buffer_cache: Option<UInt8Array>,
     /// Mapping between the indexes in the list of partition columns and the target
     /// schema. Sorted by index in the target schema so that we can iterate on it to
     /// insert the partition columns in the target record batch.
@@ -245,7 +245,7 @@ impl PartitionColumnProjector {
 }
 
 fn create_dict_array(
-    key_array_cache: &mut Option<Buffer>,
+    key_array_cache: &mut Option<UInt8Array>,
     val: &ScalarValue,
     len: usize,
 ) -> ArrayRef {
@@ -254,12 +254,12 @@ fn create_dict_array(
 
     // build keys array
     let sliced_keys = match key_array_cache {
-        Some(buf) if buf.len() >= len => buf.slice(buf.len() - len),
+        Some(buf) if buf.len() >= len => buf.slice(0, len),
         _ => key_array_cache
-            .insert(PrimitiveArray::<u8>::from_data(iter::repeat(0).take(len)))
+            .insert(UInt8Array::from_trusted_len_values_iter(iter::repeat(0).take(len)))
             .clone(),
     };
-    Arc::new(DictionaryArray::<DictionaryKey::Uint8>::from_data(
+    Arc::new(DictionaryArray::<u8>::from_data(
         sliced_keys,
         dict_vals,
     ))
@@ -361,7 +361,7 @@ mod tests {
             vec!["year".to_owned(), "month".to_owned(), "day".to_owned()];
         // create a projected schema
         let conf = config_for_projection(
-            file_batch.schema(),
+            file_batch.schema().clone(),
             // keep all cols from file and 2 from partitioning
             Some(vec![
                 0,

@@ -23,7 +23,6 @@ use crate::error::{DataFusionError, Result};
 use arrow::{
     array::*,
     buffer::MutableBuffer,
-    compute::concatenate,
     datatypes::{DataType, Field, IntegerType, IntervalUnit, TimeUnit},
     scalar::{PrimitiveScalar, Scalar},
     types::{days_ms, NativeType},
@@ -32,6 +31,7 @@ use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 use std::convert::{Infallible, TryInto};
 use std::str::FromStr;
+use arrow::datatypes::DataType::Decimal;
 
 type StringArray = Utf8Array<i32>;
 type LargeStringArray = Utf8Array<i64>;
@@ -825,11 +825,11 @@ impl ScalarValue {
             DataType::List(fields) if fields.data_type() == &DataType::LargeUtf8 => {
                 build_array_list!(MutableLargeStringArray, LargeUtf8)
             }
-            DataType::List(_) => {
-                // Fallback case handling homogeneous lists with any ScalarValue element type
-                let list_array = ScalarValue::iter_to_array_list(scalars, &data_type)?;
-                Arc::new(list_array)
-            }
+            // DataType::List(_) => {
+            //     // Fallback case handling homogeneous lists with any ScalarValue element type
+            //     let list_array = ScalarValue::iter_to_array_list(scalars, &data_type)?;
+            //     Arc::new(list_array)
+            // }
             DataType::Struct(fields) => {
                 // Initialize a Vector to store the ScalarValues for each column
                 let mut columns: Vec<Vec<ScalarValue>> =
@@ -890,7 +890,7 @@ impl ScalarValue {
         scalars: impl IntoIterator<Item = ScalarValue>,
         precision: &usize,
         scale: &usize,
-    ) -> Result<DecimalArray> {
+    ) -> Result<Int128Array> {
         // collect the value as Option<i128>
         let array = scalars
             .into_iter()
@@ -901,113 +901,83 @@ impl ScalarValue {
             .collect::<Vec<Option<i128>>>();
 
         // build the decimal array using the Decimal Builder
-        let mut builder = DecimalBuilder::new(array.len(), *precision, *scale);
-        array.iter().for_each(|element| match element {
-            None => {
-                builder.append_null().unwrap();
-            }
-            Some(v) => {
-                builder.append_value(*v).unwrap();
-            }
-        });
-        Ok(builder.finish())
+        Ok(Int128Vec::from(array).to(Decimal(*precision, *scale)).into())
     }
 
-    fn iter_to_array_list(
-        scalars: impl IntoIterator<Item = ScalarValue>,
-        data_type: &DataType,
-    ) -> Result<GenericListArray<i32>> {
-        let mut offsets = Int32Array::builder(0);
-        if let Err(err) = offsets.append_value(0) {
-            return Err(DataFusionError::ArrowError(err));
-        }
-
-        let mut elements: Vec<ArrayRef> = Vec::new();
-        let mut valid = BooleanBufferBuilder::new(0);
-        let mut flat_len = 0i32;
-        for scalar in scalars {
-            if let ScalarValue::List(values, _) = scalar {
-                match values {
-                    Some(values) => {
-                        let element_array = ScalarValue::iter_to_array(*values)?;
-
-                        // Add new offset index
-                        flat_len += element_array.len() as i32;
-                        if let Err(err) = offsets.append_value(flat_len) {
-                            return Err(DataFusionError::ArrowError(err));
-                        }
-
-                        elements.push(element_array);
-
-                        // Element is valid
-                        valid.append(true);
-                    }
-                    None => {
-                        // Repeat previous offset index
-                        if let Err(err) = offsets.append_value(flat_len) {
-                            return Err(DataFusionError::ArrowError(err));
-                        }
-
-                        // Element is null
-                        valid.append(false);
-                    }
-                }
-            } else {
-                return Err(DataFusionError::Internal(format!(
-                    "Expected ScalarValue::List element. Received {:?}",
-                    scalar
-                )));
-            }
-        }
-
-        // Concatenate element arrays to create single flat array
-        let element_arrays: Vec<&dyn Array> =
-            elements.iter().map(|a| a.as_ref()).collect();
-        let flat_array = match concatenate::concatenate(&element_arrays) {
-            Ok(flat_array) => flat_array,
-            Err(err) => return Err(DataFusionError::ArrowError(err)),
-        };
-
-        // Build ListArray using ArrayData so we can specify a flat inner array, and offset indices
-        let offsets_array = offsets.finish();
-        let array_data = ArrayDataBuilder::new(data_type.clone())
-            .len(offsets_array.len() - 1)
-            .null_bit_buffer(valid.finish())
-            .add_buffer(offsets_array.data().buffers()[0].clone())
-            .add_child_data(flat_array.data().clone());
-
-        let list_array = ListArray::from(array_data.build()?);
-        Ok(list_array)
-    }
-
-    fn build_decimal_array(
-        value: &Option<i128>,
-        precision: &usize,
-        scale: &usize,
-        size: usize,
-    ) -> DecimalArray {
-        let mut builder = DecimalBuilder::new(size, *precision, *scale);
-        match value {
-            None => {
-                for _i in 0..size {
-                    builder.append_null().unwrap();
-                }
-            }
-            Some(v) => {
-                let v = *v;
-                for _i in 0..size {
-                    builder.append_value(v).unwrap();
-                }
-            }
-        };
-        builder.finish()
-    }
+    // fn iter_to_array_list(
+    //     scalars: impl IntoIterator<Item = ScalarValue>,
+    //     data_type: &DataType,
+    // ) -> Result<GenericListArray<i32>> {
+    //     let mut offsets = Int32Array::builder(0);
+    //     if let Err(err) = offsets.append_value(0) {
+    //         return Err(DataFusionError::ArrowError(err));
+    //     }
+    //
+    //     let mut elements: Vec<ArrayRef> = Vec::new();
+    //     let mut valid = BooleanBufferBuilder::new(0);
+    //
+    //     let result: MutableListArray<data_type::>
+    //     let mut flat_len = 0i32;
+    //     for scalar in scalars {
+    //         if let ScalarValue::List(values, _) = scalar {
+    //             match values {
+    //                 Some(values) => {
+    //                     let element_array = ScalarValue::iter_to_array(*values)?;
+    //
+    //                     // Add new offset index
+    //                     flat_len += element_array.len() as i32;
+    //                     if let Err(err) = offsets.append_value(flat_len) {
+    //                         return Err(DataFusionError::ArrowError(err));
+    //                     }
+    //
+    //                     elements.push(element_array);
+    //
+    //                     // Element is valid
+    //                     valid.append(true);
+    //                 }
+    //                 None => {
+    //                     // Repeat previous offset index
+    //                     if let Err(err) = offsets.append_value(flat_len) {
+    //                         return Err(DataFusionError::ArrowError(err));
+    //                     }
+    //
+    //                     // Element is null
+    //                     valid.append(false);
+    //                 }
+    //             }
+    //         } else {
+    //             return Err(DataFusionError::Internal(format!(
+    //                 "Expected ScalarValue::List element. Received {:?}",
+    //                 scalar
+    //             )));
+    //         }
+    //     }
+    //
+    //     // Concatenate element arrays to create single flat array
+    //     let element_arrays: Vec<&dyn Array> =
+    //         elements.iter().map(|a| a.as_ref()).collect();
+    //     let flat_array = match concatenate::concatenate(&element_arrays) {
+    //         Ok(flat_array) => flat_array,
+    //         Err(err) => return Err(DataFusionError::ArrowError(err)),
+    //     };
+    //
+    //     // Build ListArray using ArrayData so we can specify a flat inner array, and offset indices
+    //     let offsets_array = offsets.finish();
+    //     let array_data = ArrayDataBuilder::new(data_type.clone())
+    //         .len(offsets_array.len() - 1)
+    //         .null_bit_buffer(valid.finish())
+    //         .add_buffer(offsets_array.data().buffers()[0].clone())
+    //         .add_child_data(flat_array.data().clone());
+    //
+    //     let list_array = ListArray::from(array_data.build()?);
+    //     Ok(list_array)
+    // }
 
     /// Converts a scalar value into an array of `size` rows.
     pub fn to_array_of_size(&self, size: usize) -> ArrayRef {
         match self {
             ScalarValue::Decimal128(e, precision, scale) => {
-                Arc::new(ScalarValue::build_decimal_array(e, precision, scale, size))
+                Int128Vec::from(repeat(e).take(size)).to(Decimal(*precision, *scale)).into_arc()
             }
             ScalarValue::Boolean(e) => {
                 Arc::new(BooleanArray::from(vec![*e; size])) as ArrayRef
@@ -1153,7 +1123,7 @@ impl ScalarValue {
         precision: &usize,
         scale: &usize,
     ) -> ScalarValue {
-        let array = array.as_any().downcast_ref::<DecimalArray>().unwrap();
+        let array = array.as_any().downcast_ref::<Int128Array>().unwrap();
         if array.is_null(index) {
             ScalarValue::Decimal128(None, *precision, *scale)
         } else {
@@ -1282,9 +1252,14 @@ impl ScalarValue {
         precision: usize,
         scale: usize,
     ) -> bool {
-        let array = array.as_any().downcast_ref::<DecimalArray>().unwrap();
-        if array.precision() != precision || array.scale() != scale {
-            return false;
+        let array = array.as_any().downcast_ref::<Int128Array>().unwrap();
+        match array.data_type() {
+            Decimal(pre, sca) => {
+                if *pre != precision || *sca != scale {
+                    return false
+                }
+            }
+            _ => return false
         }
         match value {
             None => array.is_null(index),
@@ -1874,14 +1849,14 @@ mod tests {
 
         // decimal scalar to array
         let array = decimal_value.to_array();
-        let array = array.as_any().downcast_ref::<DecimalArray>().unwrap();
+        let array = array.as_any().downcast_ref::<Int128Array>().unwrap();
         assert_eq!(1, array.len());
         assert_eq!(DataType::Decimal(10, 1), array.data_type().clone());
         assert_eq!(123i128, array.value(0));
 
         // decimal scalar to array with size
         let array = decimal_value.to_array_of_size(10);
-        let array_decimal = array.as_any().downcast_ref::<DecimalArray>().unwrap();
+        let array_decimal = array.as_any().downcast_ref::<Int128Array>().unwrap();
         assert_eq!(10, array.len());
         assert_eq!(DataType::Decimal(10, 1), array.data_type().clone());
         assert_eq!(123i128, array_decimal.value(0));
