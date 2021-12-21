@@ -25,13 +25,8 @@ use std::{
     time::Instant,
 };
 
-<<<<<<< HEAD
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::io::print;
-use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::parquet::ParquetTable;
-use ballista::context::BallistaContext;
-use ballista::prelude::{BallistaConfig, BALLISTA_DEFAULT_SHUFFLE_PARTITIONS};
 
 use datafusion::datasource::{MemTable, TableProvider};
 use datafusion::error::{DataFusionError, Result};

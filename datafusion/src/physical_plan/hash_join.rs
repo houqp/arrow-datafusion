@@ -904,7 +904,7 @@ fn produce_from_matched(
             }
             JoinSide::Right => {
                 let datatype = schema.field(idx).data_type();
-                new_null_array(datatype, num_rows).into()
+                new_null_array(datatype.clone(), num_rows).into()
             }
         };
 

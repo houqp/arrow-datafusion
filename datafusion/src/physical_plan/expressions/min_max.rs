@@ -33,8 +33,6 @@ type StringArray = Utf8Array<i32>;
 type LargeStringArray = Utf8Array<i64>;
 
 use super::format_state_name;
-use crate::arrow::array::Array;
-use arrow::array::Int128Array;
 
 // Min/max aggregation can take Dictionary encode input but always produces unpacked
 // (aka non Dictionary) output. We need to adjust the output data type to reflect this.
@@ -167,9 +165,6 @@ macro_rules! typed_min_max_batch_decimal128 {
 macro_rules! min_max_batch {
     ($VALUES:expr, $OP:ident) => {{
         match $VALUES.data_type() {
-            DataType::Decimal(precision, scale) => {
-                typed_min_max_batch_decimal128!($VALUES, precision, scale, $OP)
-            }
             // all types that have a natural order
             DataType::Int64 => {
                 typed_min_max_batch!($VALUES, Int64Array, Int64, $OP)
@@ -221,6 +216,9 @@ fn min_batch(values: &ArrayRef) -> Result<ScalarValue> {
         DataType::Float32 => {
             typed_min_max_batch!(values, Float32Array, Float32, min_primitive)
         }
+        DataType::Decimal(precision, scale) => {
+            typed_min_max_batch_decimal128!(values, precision, scale, min)
+        }
         _ => min_max_batch!(values, min_primitive),
     })
 }
@@ -239,6 +237,9 @@ fn max_batch(values: &ArrayRef) -> Result<ScalarValue> {
         }
         DataType::Float32 => {
             typed_min_max_batch!(values, Float32Array, Float32, max_primitive)
+        }
+        DataType::Decimal(precision, scale) => {
+            typed_min_max_batch_decimal128!(values, precision, scale, max)
         }
         _ => min_max_batch!(values, max_primitive),
     })

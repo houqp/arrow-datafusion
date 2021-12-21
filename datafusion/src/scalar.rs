@@ -20,6 +20,8 @@
 use std::{convert::TryFrom, fmt, iter::repeat, sync::Arc};
 
 use crate::error::{DataFusionError, Result};
+use crate::field_util::StructArrayExt;
+use arrow::datatypes::DataType::Decimal;
 use arrow::{
     array::*,
     buffer::MutableBuffer,
@@ -31,7 +33,6 @@ use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 use std::convert::{Infallible, TryInto};
 use std::str::FromStr;
-use arrow::datatypes::DataType::Decimal;
 
 type StringArray = Utf8Array<i32>;
 type LargeStringArray = Utf8Array<i64>;
@@ -734,7 +735,7 @@ impl ScalarValue {
             DataType::Decimal(precision, scale) => {
                 let decimal_array =
                     ScalarValue::iter_to_decimal_array(scalars, precision, scale)?;
-                Arc::new(decimal_array)
+                Box::new(decimal_array)
             }
             DataType::Boolean => Box::new(
                 scalars
@@ -864,15 +865,14 @@ impl ScalarValue {
                 }
 
                 // Call iter_to_array recursively to convert the scalars for each column into Arrow arrays
-                let field_values = fields
+                let field_values = columns
                     .iter()
-                    .zip(columns)
-                    .map(|(field, column)| -> Result<(Field, ArrayRef)> {
-                        Ok((field.clone(), Self::iter_to_array(column)?))
+                    .map(|c| {
+                        Self::iter_to_array(c.clone()).and_then(|x| Ok(Arc::from(x)))
                     })
                     .collect::<Result<Vec<_>>>()?;
 
-                Arc::new(StructArray::from(field_values))
+                Box::new(StructArray::from_data(data_type, field_values, None))
             }
             _ => {
                 return Err(DataFusionError::Internal(format!(
@@ -901,7 +901,9 @@ impl ScalarValue {
             .collect::<Vec<Option<i128>>>();
 
         // build the decimal array using the Decimal Builder
-        Ok(Int128Vec::from(array).to(Decimal(*precision, *scale)).into())
+        Ok(Int128Vec::from(array)
+            .to(Decimal(*precision, *scale))
+            .into())
     }
 
     // fn iter_to_array_list(
@@ -977,7 +979,9 @@ impl ScalarValue {
     pub fn to_array_of_size(&self, size: usize) -> ArrayRef {
         match self {
             ScalarValue::Decimal128(e, precision, scale) => {
-                Int128Vec::from(repeat(e).take(size)).to(Decimal(*precision, *scale)).into_arc()
+                Int128Vec::from_iter(repeat(e).take(size))
+                    .to(Decimal(*precision, *scale))
+                    .into_arc()
             }
             ScalarValue::Boolean(e) => {
                 Arc::new(BooleanArray::from(vec![*e; size])) as ArrayRef
@@ -1088,31 +1092,17 @@ impl ScalarValue {
                 }
                 None => new_null_array(self.get_datatype(), size).into(),
             },
-            ScalarValue::Struct(values, fields) => match values {
+            ScalarValue::Struct(values, _) => match values {
                 Some(values) => {
-                    let field_values: Vec<_> = fields
-                        .iter()
-                        .zip(values.iter())
-                        .map(|(field, value)| {
-                            (field.clone(), value.to_array_of_size(size))
-                        })
-                        .collect();
-
-                    Arc::new(StructArray::from(field_values))
+                    let field_values =
+                        values.iter().map(|v| v.to_array_of_size(size)).collect();
+                    Arc::new(StructArray::from_data(
+                        self.get_datatype(),
+                        field_values,
+                        None,
+                    ))
                 }
-                None => {
-                    let field_values: Vec<_> = fields
-                        .iter()
-                        .map(|field| {
-                            let none_field = Self::try_from(field.data_type()).expect(
-                                "Failed to construct null ScalarValue from Struct field type"
-                            );
-                            (field.clone(), none_field.to_array_of_size(size))
-                        })
-                        .collect();
-
-                    Arc::new(StructArray::from(field_values))
-                }
+                None => Arc::new(StructArray::new_null(self.get_datatype(), size)),
             },
         }
     }
@@ -1153,7 +1143,7 @@ impl ScalarValue {
             DataType::Int32 => typed_cast!(array, index, Int32Array, Int32),
             DataType::Int16 => typed_cast!(array, index, Int16Array, Int16),
             DataType::Int8 => typed_cast!(array, index, Int8Array, Int8),
-            DataType::Binary => typed_cast!(array, index, BinaryArray, Binary),
+            DataType::Binary => typed_cast!(array, index, SmallBinaryArray, Binary),
             DataType::LargeBinary => {
                 typed_cast!(array, index, LargeBinaryArray, LargeBinary)
             }
@@ -1230,7 +1220,7 @@ impl ScalarValue {
                         })?;
                 let mut field_values: Vec<ScalarValue> = Vec::new();
                 for col_index in 0..array.num_columns() {
-                    let col_array = array.column(col_index);
+                    let col_array = &array.values()[col_index];
                     let col_scalar = ScalarValue::try_from_array(col_array, index)?;
                     field_values.push(col_scalar);
                 }
@@ -1256,10 +1246,10 @@ impl ScalarValue {
         match array.data_type() {
             Decimal(pre, sca) => {
                 if *pre != precision || *sca != scale {
-                    return false
+                    return false;
                 }
             }
-            _ => return false
+            _ => return false,
         }
         match value {
             None => array.is_null(index),
@@ -1831,6 +1821,7 @@ impl fmt::Debug for ScalarValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::datatypes::DataType::Struct;
 
     #[test]
     fn scalar_decimal_test() {
@@ -2463,6 +2454,8 @@ mod tests {
                 field_d.clone(),
             ]),
         );
+        let dt = scalar.get_datatype();
+        let sub_dt = field_e.data_type;
 
         // Check Display
         assert_eq!(
@@ -2481,33 +2474,23 @@ mod tests {
         // Convert to length-2 array
         let array = scalar.to_array_of_size(2);
 
-        let expected = Arc::new(StructArray::from(vec![
-            (
-                field_a.clone(),
+        let expected = Arc::new(StructArray::from_data(
+            dt.clone(),
+            vec![
                 Arc::new(Int32Array::from(vec![23, 23])) as ArrayRef,
-            ),
-            (
-                field_b.clone(),
                 Arc::new(BooleanArray::from(vec![false, false])) as ArrayRef,
-            ),
-            (
-                field_c.clone(),
                 Arc::new(StringArray::from(vec!["Hello", "Hello"])) as ArrayRef,
-            ),
-            (
-                field_d.clone(),
-                Arc::new(StructArray::from(vec![
-                    (
-                        field_e.clone(),
+                Arc::new(StructArray::from_data(
+                    sub_dt.clone(),
+                    vec![
                         Arc::new(Int16Array::from(vec![2, 2])) as ArrayRef,
-                    ),
-                    (
-                        field_f.clone(),
                         Arc::new(Int64Array::from(vec![3, 3])) as ArrayRef,
-                    ),
-                ])) as ArrayRef,
-            ),
-        ])) as ArrayRef;
+                    ],
+                    None,
+                ) as ArrayRef),
+            ],
+            None,
+        )) as ArrayRef;
 
         assert_eq!(&array, &expected);
 
@@ -2576,33 +2559,23 @@ mod tests {
         ];
         let array = ScalarValue::iter_to_array(scalars).unwrap();
 
-        let expected = Arc::new(StructArray::from(vec![
-            (
-                field_a,
+        let expected = Arc::new(StructArray::from_data(
+            dt,
+            vec![
                 Arc::new(Int32Array::from(vec![23, 7, -1000])) as ArrayRef,
-            ),
-            (
-                field_b,
                 Arc::new(BooleanArray::from(vec![false, true, true])) as ArrayRef,
-            ),
-            (
-                field_c,
                 Arc::new(StringArray::from(vec!["Hello", "World", "!!!!!"])) as ArrayRef,
-            ),
-            (
-                field_d,
-                Arc::new(StructArray::from(vec![
-                    (
-                        field_e,
+                Arc::new(StructArray::from_data(
+                    sub_dt,
+                    vec![
                         Arc::new(Int16Array::from(vec![2, 4, 6])) as ArrayRef,
-                    ),
-                    (
-                        field_f,
                         Arc::new(Int64Array::from(vec![3, 5, 7])) as ArrayRef,
-                    ),
-                ])) as ArrayRef,
-            ),
-        ])) as ArrayRef;
+                    ],
+                    None,
+                )) as ArrayRef,
+            ],
+            None,
+        )) as ArrayRef;
 
         assert_eq!(&array, &expected);
     }
@@ -2660,20 +2633,18 @@ mod tests {
             ScalarValue::iter_to_array(vec![s0.clone(), s1.clone(), s2.clone()]).unwrap();
         let array = array.as_any().downcast_ref::<StructArray>().unwrap();
 
-        let expected = StructArray::from(vec![
-            (
-                field_a.clone(),
+        let expected = StructArray::from_data(
+            s0.get_datatype(),
+            vec![
                 Arc::new(StringArray::from(vec!["First", "Second", "Third"])) as ArrayRef,
-            ),
-            (
-                field_primitive_list.clone(),
                 Arc::new(ListArray::from_iter_primitive::<Int32Type, _, _>(vec![
                     Some(vec![Some(1), Some(2), Some(3)]),
                     Some(vec![Some(4), Some(5)]),
                     Some(vec![Some(6)]),
                 ])),
-            ),
-        ]);
+            ],
+            None,
+        );
 
         assert_eq!(array, &expected);
 
@@ -2691,7 +2662,7 @@ mod tests {
 
         // iter_to_array for list-of-struct
         let array = ScalarValue::iter_to_array(vec![nl0, nl1, nl2]).unwrap();
-        let array = array.as_any().downcast_ref::<ListArray>().unwrap();
+        let array = array.as_any().downcast_ref::<ListArray<i32>>().unwrap();
 
         // Construct expected array with array builders
         let field_a_builder = StringBuilder::new(4);
@@ -2889,7 +2860,7 @@ mod tests {
         );
 
         let array = ScalarValue::iter_to_array(vec![l1, l2, l3]).unwrap();
-        let array = array.as_any().downcast_ref::<ListArray>().unwrap();
+        let array = array.as_any().downcast_ref::<ListArray<i32>>().unwrap();
 
         // Construct expected array with array builders
         let inner_builder = Int32Array::builder(8);

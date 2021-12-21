@@ -25,6 +25,7 @@ use crate::physical_plan::{
 use crate::scalar::ScalarValue;
 use arrow::array::{ArrayRef, BinaryArray, Offset, PrimitiveArray, Utf8Array};
 use arrow::datatypes::{DataType, Field};
+use arrow::types::NativeType;
 use std::any::type_name;
 use std::any::Any;
 use std::convert::TryFrom;
@@ -32,7 +33,6 @@ use std::convert::TryInto;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use arrow::types::NativeType;
 
 /// APPROX_DISTINCT aggregate expression
 #[derive(Debug)]
@@ -229,7 +229,10 @@ macro_rules! default_accumulator_impl {
 
         fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
             assert_eq!(1, states.len(), "expect only 1 element in the states");
-            let binary_array = states[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+            let binary_array = states[0]
+                .as_any()
+                .downcast_ref::<BinaryArray<i32>>()
+                .unwrap();
             for v in binary_array.iter() {
                 let v = v.ok_or_else(|| {
                     DataFusionError::Internal(
@@ -272,8 +275,7 @@ where
     T: Offset,
 {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        let array: &BinaryArray<T> =
-            downcast_value!(values, BinaryArray, T);
+        let array: &BinaryArray<T> = downcast_value!(values, BinaryArray, T);
         // flatten because we would skip nulls
         self.hll
             .extend(array.into_iter().flatten().map(|v| v.to_vec()));
@@ -288,8 +290,7 @@ where
     T: Offset,
 {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        let array: &Utf8Array<T> =
-            downcast_value!(values, Utf8Array, T);
+        let array: &Utf8Array<T> = downcast_value!(values, Utf8Array, T);
         // flatten because we would skip nulls
         self.hll
             .extend(array.into_iter().flatten().map(|i| i.to_string()));

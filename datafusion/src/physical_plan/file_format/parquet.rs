@@ -433,8 +433,9 @@ fn read_partition(
         );
         let object_reader =
             object_store.file_reader(partitioned_file.file_meta.sized_file.clone())?;
+        let reader = object_reader.sync_reader()?;
         let mut record_reader = read::RecordReader::try_new(
-            std::io::BufReader::new(object_reader),
+            reader,
             Some(projection.to_vec()),
             limit,
             None,

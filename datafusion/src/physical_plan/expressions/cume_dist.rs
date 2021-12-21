@@ -88,18 +88,18 @@ impl PartitionEvaluator for CumeDistEvaluator {
         ranks_in_partition: &[Range<usize>],
     ) -> Result<ArrayRef> {
         let scaler = (partition.end - partition.start) as f64;
-        let result = Float64Array::from_iter_values(
-            ranks_in_partition
-                .iter()
-                .scan(0_u64, |acc, range| {
-                    let len = range.end - range.start;
-                    *acc += len as u64;
-                    let value: f64 = (*acc as f64) / scaler;
-                    let result = iter::repeat(value).take(len);
-                    Some(result)
-                })
-                .flatten(),
-        );
+        let result = ranks_in_partition
+            .iter()
+            .scan(0_u64, |acc, range| {
+                let len = range.end - range.start;
+                *acc += len as u64;
+                let value: f64 = (*acc as f64) / scaler;
+                let result = iter::repeat(value).take(len);
+                Some(result)
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        let result = Float64Array::from_values(result);
         Ok(Arc::new(result))
     }
 }

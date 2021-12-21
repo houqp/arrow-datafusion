@@ -124,7 +124,7 @@ impl<F: FormatReaderOpener> FileStream<F> {
                     self.object_store
                         .file_reader(f.file_meta.sized_file)
                         .and_then(|r| r.sync_reader())
-                        .map_err(|e| ArrowError::ExternalError(Box::new(e)))
+                        .map_err(|e| ArrowError::External("".to_owned(), Box::new(e)))
                         .and_then(|f| {
                             self.batch_iter = (self.file_reader)(f, &self.remain);
                             self.next_batch().transpose()
@@ -197,7 +197,7 @@ mod tests {
     async fn create_and_collect(limit: Option<usize>) -> Vec<RecordBatch> {
         let records = vec![make_partition(3), make_partition(2)];
 
-        let source_schema = records[0].schema();
+        let source_schema = records[0].schema().clone();
 
         let reader = move |_file, _remain: &Option<usize>| {
             // this reader returns the same batch regardless of the file

@@ -85,7 +85,8 @@ fn handle<'a, O, F>(
     args: &'a [ColumnarValue],
     op: F,
     name: &str,
-    data_type: DataType) -> Result<ColumnarValue>
+    data_type: DataType,
+) -> Result<ColumnarValue>
 where
     O: NativeType,
     ScalarValue: From<Option<O>>,

@@ -40,6 +40,7 @@ use crate::{
     scalar::ScalarValue,
 };
 use arrow::array::UInt8Array;
+use arrow::datatypes::IntegerType;
 use lazy_static::lazy_static;
 use std::{
     collections::HashMap,
@@ -52,7 +53,8 @@ use super::{ColumnStatistics, Statistics};
 
 lazy_static! {
     /// The datatype used for all partitioning columns for now
-    pub static ref DEFAULT_PARTITION_COLUMN_DATATYPE: DataType = DataType::Dictionary(Box::new(DataType::UInt8), Box::new(DataType::Utf8));
+    pub static ref DEFAULT_PARTITION_COLUMN_DATATYPE: DataType =
+        DataType::Dictionary(IntegerType::UInt8, Box::new(DataType::Utf8));
 }
 
 /// The base configurations to provide when creating a physical plan for
@@ -204,7 +206,7 @@ impl PartitionColumnProjector {
 
         Self {
             projected_partition_indexes,
-            key_buffer_cache: None,
+            key_array_cache: None,
             projected_schema,
         }
     }
@@ -222,7 +224,7 @@ impl PartitionColumnProjector {
             self.projected_schema.fields().len() - self.projected_partition_indexes.len();
 
         if file_batch.columns().len() != expected_cols {
-            return Err(ArrowError::SchemaError(format!(
+            return Err(ArrowError::ExternalFormat(format!(
                 "Unexpected batch schema from file, expected {} cols but got {}",
                 expected_cols,
                 file_batch.columns().len()

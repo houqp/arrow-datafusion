@@ -24,7 +24,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{stream, AsyncRead, StreamExt};
 
-use crate::datasource::object_store::{FileMeta, FileMetaStream, ListEntryStream, ObjectReader, ObjectStore, ReadSeek};
+use crate::datasource::object_store::{
+    FileMeta, FileMetaStream, ListEntryStream, ObjectReader, ObjectStore, ReadSeek,
+};
 use crate::datasource::PartitionedFile;
 use crate::error::DataFusionError;
 use crate::error::Result;

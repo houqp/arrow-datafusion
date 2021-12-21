@@ -17,9 +17,9 @@
 
 //! Utility functions for complex field access
 
-use std::borrow::Borrow;
 use arrow::array::{ArrayRef, StructArray};
 use arrow::datatypes::{DataType, Field};
+use std::borrow::Borrow;
 
 use crate::error::{DataFusionError, Result};
 use crate::scalar::ScalarValue;
@@ -73,6 +73,7 @@ pub fn get_indexed_field(data_type: &DataType, key: &ScalarValue) -> Result<Fiel
 pub trait StructArrayExt {
     fn column_names(&self) -> Vec<&str>;
     fn column_by_name(&self, column_name: &str) -> Option<&ArrayRef>;
+    fn num_columns(&self) -> usize;
 }
 
 impl StructArrayExt for StructArray {
@@ -85,5 +86,9 @@ impl StructArrayExt for StructArray {
             .iter()
             .position(|c| c.name() == column_name)
             .map(|pos| self.values()[pos].borrow())
+    }
+
+    fn num_columns(&self) -> usize {
+        self.fields().len()
     }
 }

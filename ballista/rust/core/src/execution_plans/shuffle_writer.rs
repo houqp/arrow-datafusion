@@ -488,11 +488,11 @@ impl ShuffleWriter {
 mod tests {
     use super::*;
     use datafusion::arrow::array::{StructArray, UInt32Array, UInt64Array, Utf8Array};
+    use datafusion::field_util::StructArrayExt;
     use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
     use datafusion::physical_plan::expressions::Column;
     use datafusion::physical_plan::limit::GlobalLimitExec;
     use datafusion::physical_plan::memory::MemoryExec;
-    use datafusion::field_util::StructArrayExt;
     use tempfile::TempDir;
 
     #[tokio::test]
