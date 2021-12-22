@@ -23,8 +23,11 @@ use crate::physical_plan::{
 };
 
 use arrow::datatypes::SchemaRef;
+use arrow::error::Result as ArrowResult;
 use arrow::io::csv;
+use arrow::record_batch::RecordBatch;
 use std::any::Any;
+use std::io::Read;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -70,6 +73,80 @@ impl CsvExec {
     }
 }
 
+// CPU-intensive task
+fn deserialize(
+    rows: &[csv::read::ByteRecord],
+    projection: &Option<Vec<usize>>,
+    schema: &SchemaRef,
+) -> ArrowResult<RecordBatch> {
+    csv::read::deserialize_batch(
+        rows,
+        schema.fields(),
+        projection.map(|p| &p[..]),
+        0,
+        csv::read::deserialize_column,
+    )
+}
+
+struct CsvBatchReader<R: Read> {
+    reader: csv::read::Reader<R>,
+    current_read: usize,
+    rows_read: usize,
+    batch_size: usize,
+    rows: Vec<csv::read::ByteRecord>,
+    limit: Option<usize>,
+    projection: Option<Vec<usize>>,
+    schema: SchemaRef,
+}
+
+impl<R: Read> CsvBatchReader<R> {
+    fn new(
+        reader: csv::read::Reader<R>,
+        schema: SchemaRef,
+        batch_size: usize,
+        limit: Option<usize>,
+        projection: Option<Vec<usize>>,
+    ) -> Self {
+        let rows = vec![csv::read::ByteRecord::default(); batch_size];
+        Self {
+            reader,
+            schema,
+            current_read: 0,
+            rows,
+            rows_read: 0,
+            batch_size,
+            limit,
+            projection,
+        }
+    }
+}
+
+impl<R: Read> Iterator for CsvBatchReader<R> {
+    type Item = ArrowResult<RecordBatch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.rows_read < self.batch_size {
+            return None;
+        }
+
+        let batch_size = match self.limit {
+            Some(limit) => self.batch_size.min(limit - self.current_read),
+            None => self.batch_size,
+        };
+        let rows_read =
+            csv::read::read_rows(&mut self.reader, 0, &mut self.rows[..batch_size]);
+
+        Some(rows_read.and_then(|rows_read| {
+            self.current_read += rows_read;
+
+            let batch =
+                deserialize(&self.rows[..rows_read], &self.projection, &self.schema)?;
+            self.rows_read = rows_read;
+            Ok(batch)
+        }))
+    }
+}
+
 #[async_trait]
 impl ExecutionPlan for CsvExec {
     /// Return a reference to Any that can be used for downcasting
@@ -108,21 +185,21 @@ impl ExecutionPlan for CsvExec {
 
     async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
         let batch_size = self.base_config.batch_size;
-        let file_schema = Arc::clone(&self.base_config.file_schema);
+        let file_schema = self.base_config.file_schema.clone();
         let file_projection = self.base_config.file_column_projection_indices();
         let has_header = self.has_header;
         let delimiter = self.delimiter;
-        let start_line = if has_header { 1 } else { 0 };
 
-        let fun = move |file, remaining: &Option<usize>| {
-            let bounds = remaining.map(|x| (0, x + start_line));
-            Box::new(csv::read::Reader::new(
-                file,
-                Arc::clone(&file_schema),
-                has_header,
-                Some(delimiter),
+        let fun = move |freader, remaining: &Option<usize>| {
+            let reader = csv::read::ReaderBuilder::new()
+                .delimiter(delimiter)
+                .has_headers(has_header)
+                .from_reader(freader);
+            Box::new(CsvBatchReader::new(
+                reader,
+                file_schema.clone(),
                 batch_size,
-                bounds,
+                remaining.clone(),
                 file_projection.clone(),
             )) as BatchIter
         };

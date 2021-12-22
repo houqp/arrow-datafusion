@@ -98,9 +98,9 @@ impl FileFormat for CsvFormat {
 
         while let Some(obj_reader) = readers.next().await {
             let mut reader = csv::read::ReaderBuilder::new()
-                .from_reader(obj_reader?.sync_reader()?)
                 .delimiter(self.delimiter)
-                .has_headers(self.has_header);
+                .has_headers(self.has_header)
+                .from_reader(obj_reader?.sync_reader()?);
 
             let schema = csv::read::infer_schema(
                 &mut reader,

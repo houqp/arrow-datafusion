@@ -60,7 +60,7 @@ impl FileFormat for JsonFormat {
         let mut schemas = Vec::new();
         let records_to_read = self.schema_infer_max_rec;
         while let Some(obj_reader) = readers.next().await {
-            let mut reader = obj_reader?.sync_reader()?;
+            let mut reader = std::io::BufReader::new(obj_reader?.sync_reader()?);
             // FIXME: return number of records read from infer_json_schema so we can enforce
             // records_to_read
             let schema = json::infer_json_schema(&mut reader, records_to_read)?;
