@@ -2660,11 +2660,10 @@ async fn test_join_timestamp() -> Result<()> {
     )]));
     let timestamp_data = RecordBatch::try_new(
         timestamp_schema.clone(),
-        vec![Arc::new(TimestampNanosecondArray::from(vec![
-            131964190213133,
-            131964190213134,
-            131964190213135,
-        ]))],
+        vec![Arc::new(
+            Int64Array::from_slice(&[131964190213133, 131964190213134, 131964190213135])
+                .to(DataType::TimestampNanosecond),
+        )],
     )?;
     let timestamp_table =
         MemTable::try_new(timestamp_schema, vec![vec![timestamp_data]])?;
@@ -2703,8 +2702,12 @@ async fn test_join_float32() -> Result<()> {
     let population_data = RecordBatch::try_new(
         population_schema.clone(),
         vec![
-            Arc::new(StringArray::from(vec![Some("a"), Some("b"), Some("c")])),
-            Arc::new(Float32Array::from(vec![838.698, 1778.934, 626.443])),
+            Arc::new(Utf8Array::<i32>::from(vec![
+                Some("a"),
+                Some("b"),
+                Some("c"),
+            ])),
+            Arc::new(Float32Array::from_slice(vec![838.698, 1778.934, 626.443])),
         ],
     )?;
     let population_table =
@@ -2744,8 +2747,12 @@ async fn test_join_float64() -> Result<()> {
     let population_data = RecordBatch::try_new(
         population_schema.clone(),
         vec![
-            Arc::new(StringArray::from(vec![Some("a"), Some("b"), Some("c")])),
-            Arc::new(Float64Array::from(vec![838.698, 1778.934, 626.443])),
+            Arc::new(Utf8Array::<i32>::from(vec![
+                Some("a"),
+                Some("b"),
+                Some("c"),
+            ])),
+            Arc::new(Float64Array::from_slice(vec![838.698, 1778.934, 626.443])),
         ],
     )?;
     let population_table =
@@ -5723,10 +5730,12 @@ async fn test_regexp_is_match() -> Result<()> {
 #[tokio::test]
 async fn join_tables_with_duplicated_column_name_not_in_on_constraint() -> Result<()> {
     let batch = RecordBatch::try_from_iter(vec![
-        ("id", Arc::new(Int32Array::from(vec![1, 2, 3])) as _),
+        ("id", Arc::new(Int32Array::from_slice(&[1, 2, 3])) as _),
         (
             "country",
-            Arc::new(StringArray::from(vec!["Germany", "Sweden", "Japan"])) as _,
+            Arc::new(Utf8Array::<i32>::from_slice(&[
+                "Germany", "Sweden", "Japan",
+            ])) as _,
         ),
     ])
     .unwrap();
@@ -5739,7 +5748,7 @@ async fn join_tables_with_duplicated_column_name_not_in_on_constraint() -> Resul
         ),
         (
             "city",
-            Arc::new(StringArray::from(vec![
+            Arc::new(Utf8Array::<i32>::from_slice(&[
                 "Hamburg",
                 "Stockholm",
                 "Osaka",
@@ -5751,7 +5760,7 @@ async fn join_tables_with_duplicated_column_name_not_in_on_constraint() -> Resul
         ),
         (
             "country_id",
-            Arc::new(Int32Array::from(vec![1, 2, 3, 1, 2, 3, 3])) as _,
+            Arc::new(Int32Array::from_slice(&[1, 2, 3, 1, 2, 3, 3])) as _,
         ),
     ])
     .unwrap();
@@ -5977,9 +5986,9 @@ async fn use_between_expression_in_select_query() -> Result<()> {
     ];
     assert_batches_eq!(expected, &actual);
 
-    let input = Int64Array::from(vec![1, 2, 3, 4]);
+    let input = Int64Array::from_slice(&[1, 2, 3, 4]);
     let batch = RecordBatch::try_from_iter(vec![("c1", Arc::new(input) as _)]).unwrap();
-    let table = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
+    let table = MemTable::try_new(batch.schema().clone(), vec![vec![batch]])?;
     ctx.register_table("test", Arc::new(table))?;
 
     let sql = "SELECT abs(c1) BETWEEN 0 AND LoG(c1 * 100 ) FROM test";

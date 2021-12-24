@@ -2477,17 +2477,17 @@ mod tests {
         let expected = Arc::new(StructArray::from_data(
             dt.clone(),
             vec![
-                Arc::new(Int32Array::from(vec![23, 23])) as ArrayRef,
-                Arc::new(BooleanArray::from(vec![false, false])) as ArrayRef,
-                Arc::new(StringArray::from(vec!["Hello", "Hello"])) as ArrayRef,
+                Arc::new(Int32Array::from_slice([23, 23])) as ArrayRef,
+                Arc::new(BooleanArray::from_slice([false, false])) as ArrayRef,
+                Arc::new(StringArray::from_slice(["Hello", "Hello"])) as ArrayRef,
                 Arc::new(StructArray::from_data(
                     sub_dt.clone(),
                     vec![
-                        Arc::new(Int16Array::from(vec![2, 2])) as ArrayRef,
-                        Arc::new(Int64Array::from(vec![3, 3])) as ArrayRef,
+                        Arc::new(Int16Array::from_slice([2, 2])) as ArrayRef,
+                        Arc::new(Int64Array::from_slice([3, 3])) as ArrayRef,
                     ],
                     None,
-                ) as ArrayRef),
+                )) as ArrayRef,
             ],
             None,
         )) as ArrayRef;
@@ -2562,14 +2562,15 @@ mod tests {
         let expected = Arc::new(StructArray::from_data(
             dt,
             vec![
-                Arc::new(Int32Array::from(vec![23, 7, -1000])) as ArrayRef,
-                Arc::new(BooleanArray::from(vec![false, true, true])) as ArrayRef,
-                Arc::new(StringArray::from(vec!["Hello", "World", "!!!!!"])) as ArrayRef,
+                Arc::new(Int32Array::from_slice(&[23, 7, -1000])) as ArrayRef,
+                Arc::new(BooleanArray::from_slice(&[false, true, true])) as ArrayRef,
+                Arc::new(StringArray::from_slice(&["Hello", "World", "!!!!!"]))
+                    as ArrayRef,
                 Arc::new(StructArray::from_data(
                     sub_dt,
                     vec![
-                        Arc::new(Int16Array::from(vec![2, 4, 6])) as ArrayRef,
-                        Arc::new(Int64Array::from(vec![3, 5, 7])) as ArrayRef,
+                        Arc::new(Int16Array::from_slice(&[2, 4, 6])) as ArrayRef,
+                        Arc::new(Int64Array::from_slice(&[3, 5, 7])) as ArrayRef,
                     ],
                     None,
                 )) as ArrayRef,
@@ -2636,7 +2637,8 @@ mod tests {
         let expected = StructArray::from_data(
             s0.get_datatype(),
             vec![
-                Arc::new(StringArray::from(vec!["First", "Second", "Third"])) as ArrayRef,
+                Arc::new(StringArray::from_slice(&["First", "Second", "Third"]))
+                    as ArrayRef,
                 Arc::new(ListArray::from_iter_primitive::<Int32Type, _, _>(vec![
                     Some(vec![Some(1), Some(2), Some(3)]),
                     Some(vec![Some(4), Some(5)]),

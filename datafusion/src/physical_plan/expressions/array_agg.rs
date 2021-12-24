@@ -247,7 +247,7 @@ mod tests {
         let array = ScalarValue::iter_to_array(vec![l1, l2, l3]).unwrap();
 
         generic_test_op!(
-            array,
+            Arc::new(array),
             DataType::List(Box::new(Field::new(
                 "item",
                 DataType::List(Box::new(Field::new("item", DataType::Int32, true,))),

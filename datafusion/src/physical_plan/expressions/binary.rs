@@ -645,6 +645,10 @@ fn is_distinct_from(left: &dyn Array, right: &dyn Array) -> Result<Arc<dyn Array
         (DataType::Boolean, DataType::Boolean) => {
             Ok(Arc::new(is_distinct_from_bool(left, right)))
         }
+        (lhs, rhs) => Err(DataFusionError::Internal(format!(
+            "Cannot evaluate is_distinct_from expression with types {:?} and {:?}",
+            lhs, rhs
+        ))),
     }
 }
 
@@ -680,6 +684,10 @@ fn is_not_distinct_from(left: &dyn Array, right: &dyn Array) -> Result<Arc<dyn A
         (DataType::Boolean, DataType::Boolean) => {
             Ok(Arc::new(is_not_distinct_from_bool(left, right)))
         }
+        (lhs, rhs) => Err(DataFusionError::Internal(format!(
+            "Cannot evaluate is_not_distinct_from expression with types {:?} and {:?}",
+            lhs, rhs
+        ))),
     }
 }
 

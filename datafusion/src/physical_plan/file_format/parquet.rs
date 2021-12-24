@@ -473,7 +473,6 @@ mod tests {
     };
 
     use super::*;
-    use arrow::array::{Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field};
     use futures::StreamExt;
     use parquet::{

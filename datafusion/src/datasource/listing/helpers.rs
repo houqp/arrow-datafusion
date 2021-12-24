@@ -292,7 +292,7 @@ fn paths_to_batch(
         length_builder.into_arc(),
         modified_builder.to(DataType::Date64).into_arc(),
     ];
-    for mut partition_builder in partition_builders {
+    for partition_builder in partition_builders {
         col_arrays.push(partition_builder.into_arc());
     }
 

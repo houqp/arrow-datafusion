@@ -76,13 +76,13 @@ impl CsvExec {
 // CPU-intensive task
 fn deserialize(
     rows: &[csv::read::ByteRecord],
-    projection: &Option<Vec<usize>>,
+    projection: Option<&Vec<usize>>,
     schema: &SchemaRef,
 ) -> ArrowResult<RecordBatch> {
     csv::read::deserialize_batch(
         rows,
         schema.fields(),
-        projection.map(|p| &p[..]),
+        projection.map(|p| p.as_slice()),
         0,
         csv::read::deserialize_column,
     )
@@ -139,8 +139,11 @@ impl<R: Read> Iterator for CsvBatchReader<R> {
         Some(rows_read.and_then(|rows_read| {
             self.current_read += rows_read;
 
-            let batch =
-                deserialize(&self.rows[..rows_read], &self.projection, &self.schema)?;
+            let batch = deserialize(
+                &self.rows[..rows_read],
+                self.projection.as_ref(),
+                &self.schema,
+            )?;
             self.rows_read = rows_read;
             Ok(batch)
         }))

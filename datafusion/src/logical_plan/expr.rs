@@ -36,6 +36,7 @@ use functions::{ReturnTypeFunction, ScalarFunctionImplementation, Signature};
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::fmt;
+use std::hash::Hash;
 use std::ops::Not;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -221,7 +222,7 @@ impl fmt::Display for Column {
 ///   assert_eq!(op, Operator::Eq);
 /// }
 /// ```
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, Hash)]
 pub enum Expr {
     /// An expression with a specific name.
     Alias(Box<Expr>, String),
@@ -370,6 +371,22 @@ pub enum Expr {
     },
     /// Represents a reference to all fields in a schema.
     Wildcard,
+}
+
+impl PartialOrd for Expr {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::hash::Hasher;
+
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        let s = hasher.finish();
+
+        let mut hasher = ahash::AHasher::default();
+        other.hash(&mut hasher);
+        let o = hasher.finish();
+
+        Some(s.cmp(&o))
+    }
 }
 
 impl Expr {

@@ -187,7 +187,7 @@ mod tests {
         ranks: Vec<Range<usize>>,
         expected: Vec<f64>,
     ) -> Result<()> {
-        let arr: ArrayRef = Arc::new(Int32Array::from(data));
+        let arr: ArrayRef = Arc::new(Int32Array::from_slice(data.as_slice()));
         let values = vec![arr];
         let schema = Schema::new(vec![Field::new("arr", DataType::Int32, false)]);
         let batch = RecordBatch::try_new(Arc::new(schema), values.clone())?;

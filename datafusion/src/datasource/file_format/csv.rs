@@ -146,8 +146,6 @@ impl FileFormat for CsvFormat {
 
 #[cfg(test)]
 mod tests {
-    use arrow::array::StringArray;
-
     use super::*;
     use crate::{
         datasource::{
@@ -244,7 +242,7 @@ mod tests {
         let array = batches[0]
             .column(0)
             .as_any()
-            .downcast_ref::<StringArray>()
+            .downcast_ref::<Utf8Array<i32>>()
             .unwrap();
         let mut values: Vec<&str> = vec![];
         for i in 0..5 {

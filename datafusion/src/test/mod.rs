@@ -17,21 +17,19 @@
 
 //! Common unit test utility methods
 
+use crate::datasource::{MemTable, TableProvider};
+use crate::error::Result;
+use crate::logical_plan::{LogicalPlan, LogicalPlanBuilder};
+use arrow::array::*;
+use arrow::datatypes::*;
+use arrow::record_batch::RecordBatch;
+use futures::{Future, FutureExt};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
 use std::pin::Pin;
 use std::sync::Arc;
-
 use tempfile::TempDir;
-
-use arrow::array::*;
-use arrow::datatypes::*;
-use arrow::record_batch::RecordBatch;
-
-use crate::datasource::{MemTable, TableProvider};
-use crate::error::Result;
-use crate::logical_plan::{LogicalPlan, LogicalPlanBuilder};
 
 pub fn create_table_dual() -> Arc<dyn TableProvider> {
     let dual_schema = Arc::new(Schema::new(vec![

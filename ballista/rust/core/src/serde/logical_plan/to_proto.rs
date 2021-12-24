@@ -20,7 +20,6 @@
 //! processes.
 
 use super::super::proto_error;
-use crate::datasource::DfTableAdapter;
 use crate::serde::protobuf::integer_type::IntegerTypeEnum;
 use crate::serde::{byte_to_string, protobuf, BallistaError};
 use arrow::datatypes::{IntegerType, UnionMode};
