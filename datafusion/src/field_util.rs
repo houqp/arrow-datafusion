@@ -70,9 +70,13 @@ pub fn get_indexed_field(data_type: &DataType, key: &ScalarValue) -> Result<Fiel
     }
 }
 
+/// Imitate arrow-rs StructArray behavior by extending arrow2 StructArray
 pub trait StructArrayExt {
+    /// Return field names in this struct array
     fn column_names(&self) -> Vec<&str>;
+    /// Return child array whose field name equals to column_name
     fn column_by_name(&self, column_name: &str) -> Option<&ArrayRef>;
+    /// Return the number of fields in this struct array
     fn num_columns(&self) -> usize;
 }
 

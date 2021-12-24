@@ -2662,7 +2662,7 @@ async fn test_join_timestamp() -> Result<()> {
         timestamp_schema.clone(),
         vec![Arc::new(
             Int64Array::from_slice(&[131964190213133, 131964190213134, 131964190213135])
-                .to(DataType::TimestampNanosecond),
+                .to(DataType::Timestamp(TimeUnit::Nanosecond, None)),
         )],
     )?;
     let timestamp_table =
@@ -2957,7 +2957,7 @@ async fn csv_explain_analyze() {
     register_aggregate_csv_by_sql(&mut ctx).await;
     let sql = "EXPLAIN ANALYZE SELECT count(*), c1 FROM aggregate_test_100 group by c1";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let formatted = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let formatted = arrow::io::print::write(&actual);
 
     // Only test basic plumbing and try to avoid having to change too
     // many things. explain_analyze_baseline_metrics covers the values
@@ -2977,7 +2977,7 @@ async fn csv_explain_analyze_verbose() {
     let sql =
         "EXPLAIN ANALYZE VERBOSE SELECT count(*), c1 FROM aggregate_test_100 group by c1";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let formatted = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let formatted = arrow::io::print::write(&actual);
 
     let verbose_needle = "Output Rows";
     assert_contains!(formatted, verbose_needle);
@@ -3742,7 +3742,7 @@ async fn register_boolean(ctx: &mut ExecutionContext) -> Result<()> {
 
     let data =
         RecordBatch::try_from_iter([("a", Arc::new(a) as _), ("b", Arc::new(b) as _)])?;
-    let table = MemTable::try_new(data.schema(), vec![vec![data]])?;
+    let table = MemTable::try_new(data.schema().clone(), vec![vec![data]])?;
     ctx.register_table("t1", Arc::new(table))?;
     Ok(())
 }
@@ -5739,12 +5739,12 @@ async fn join_tables_with_duplicated_column_name_not_in_on_constraint() -> Resul
         ),
     ])
     .unwrap();
-    let countries = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
+    let countries = MemTable::try_new(batch.schema().clone(), vec![vec![batch]])?;
 
     let batch = RecordBatch::try_from_iter(vec![
         (
             "id",
-            Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5, 6, 7])) as _,
+            Arc::new(Int32Array::from_slice(vec![1, 2, 3, 4, 5, 6, 7])) as _,
         ),
         (
             "city",
@@ -5764,7 +5764,7 @@ async fn join_tables_with_duplicated_column_name_not_in_on_constraint() -> Resul
         ),
     ])
     .unwrap();
-    let cities = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
+    let cities = MemTable::try_new(batch.schema().clone(), vec![vec![batch]])?;
 
     let mut ctx = ExecutionContext::new();
     ctx.register_table("countries", Arc::new(countries))?;
@@ -6008,7 +6008,7 @@ async fn use_between_expression_in_select_query() -> Result<()> {
 
     let sql = "EXPLAIN SELECT c1 BETWEEN 2 AND 3 FROM test";
     let actual = execute_to_batches(&mut ctx, sql).await;
-    let formatted = arrow::util::pretty::pretty_format_batches(&actual).unwrap();
+    let formatted = print::write(&actual);
 
     // Only test that the projection exprs arecorrect, rather than entire output
     let needle = "ProjectionExec: expr=[c1@0 >= 2 AND c1@0 <= 3 as test.c1 BETWEEN Int64(2) AND Int64(3)]";

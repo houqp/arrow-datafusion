@@ -552,7 +552,6 @@ impl TryFrom<&DataType> for protobuf::scalar_type::Datatype {
             | DataType::Struct(_)
             | DataType::Union(_, _, _)
             | DataType::Dictionary(_, _)
-            | DataType::Map(_, _)
             | DataType::Decimal(_, _) => {
                 return Err(proto_error(format!(
                     "Error converting to Datatype to scalar type, {:?} is invalid as a datafusion scalar.",

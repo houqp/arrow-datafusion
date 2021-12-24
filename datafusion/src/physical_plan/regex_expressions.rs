@@ -251,6 +251,7 @@ pub fn regexp_matches<O: Offset>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    type StringArray = Utf8Array<i32>;
 
     #[test]
     fn match_single_group() -> Result<()> {
@@ -316,9 +317,9 @@ mod tests {
 
     #[test]
     fn test_case_sensitive_regexp_match() {
-        let values = StringArray::from(vec!["abc"; 5]);
+        let values = StringArray::from_slice(vec!["abc"; 5]);
         let patterns =
-            StringArray::from(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
+            StringArray::from_slice(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
 
         let elem_builder: GenericStringBuilder<i32> = GenericStringBuilder::new(0);
         let mut expected_builder = ListBuilder::new(elem_builder);
@@ -338,13 +339,13 @@ mod tests {
 
     #[test]
     fn test_case_insensitive_regexp_match() {
-        let values = StringArray::from(vec!["abc"; 5]);
+        let values = StringArray::from_slice(vec!["abc"; 5]);
         let patterns =
-            StringArray::from(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
-        let flags = StringArray::from(vec!["i"; 5]);
+            StringArray::from_slice(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
+        let flags = StringArray::from_slice(vec!["i"; 5]);
 
         let elem_builder: GenericStringBuilder<i32> = GenericStringBuilder::new(0);
-        let mut expected_builder = ListBuilder::new(elem_builder);
+        let mut expected_builder = MutableListArray::new(elem_builder);
         expected_builder.values().append_value("a").unwrap();
         expected_builder.append(true).unwrap();
         expected_builder.values().append_value("a").unwrap();

@@ -293,7 +293,7 @@ mod tests {
             "+----+-----+------------+",
         ];
 
-        crate::assert_batches_eq!(expected, &[batch.slice(0, 5)]);
+        crate::assert_batches_eq!(expected, &[batch_slice(&batch, 0, 5)]);
         Ok(())
     }
 
@@ -391,7 +391,27 @@ mod tests {
             "| b  | 2021-10-26 |",
             "+----+------------+",
         ];
-        crate::assert_batches_eq!(expected, &[batch.slice(0, 5)]);
+        crate::assert_batches_eq!(expected, &[batch_slice(&batch, 0, 5)]);
         Ok(())
+    }
+
+    fn batch_slice(batch: &RecordBatch, offset: usize, length: usize) -> RecordBatch {
+        let schema = batch.schema().clone();
+        if schema.fields().is_empty() {
+            assert_eq!(offset + length, 0);
+            return RecordBatch::new_empty(schema);
+        }
+        assert!((offset + length) <= batch.num_rows());
+
+        let columns = batch
+            .columns()
+            .iter()
+            .map(|column| column.slice(offset, length))
+            .collect();
+
+        Self {
+            schema,
+            columns,
+        }
     }
 }

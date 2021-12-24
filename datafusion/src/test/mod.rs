@@ -17,7 +17,8 @@
 
 //! Common unit test utility methods
 
-use crate::datasource::{MemTable, TableProvider};
+use crate::datasource::object_store::local::local_unpartitioned_file;
+use crate::datasource::{MemTable, PartitionedFile, TableProvider};
 use crate::error::Result;
 use crate::logical_plan::{LogicalPlan, LogicalPlanBuilder};
 use arrow::array::*;
@@ -190,7 +191,7 @@ pub fn table_with_decimal() -> Arc<dyn TableProvider> {
     let batch_decimal = make_decimal();
     let schema = batch_decimal.schema();
     let partitions = vec![vec![batch_decimal]];
-    Arc::new(MemTable::try_new(schema, partitions).unwrap())
+    Arc::new(MemTable::try_new(schema.clone(), partitions).unwrap())
 }
 
 fn make_decimal() -> RecordBatch {

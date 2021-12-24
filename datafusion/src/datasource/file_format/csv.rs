@@ -157,6 +157,7 @@ mod tests {
         },
         physical_plan::collect,
     };
+    use arrow::array::Utf8Array;
 
     #[tokio::test]
     async fn read_small_batches() -> Result<()> {

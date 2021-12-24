@@ -33,6 +33,7 @@ use local::LocalFileSystem;
 
 use crate::error::{DataFusionError, Result};
 
+/// Both Read and Seek
 pub trait ReadSeek: Read + Seek {}
 
 impl<R: Read + Seek> ReadSeek for std::io::BufReader<R> {}

@@ -4100,8 +4100,8 @@ mod tests {
                         .unwrap();
 
                 // create mock record batch
-                let ids = Arc::new(Int32Array::from(vec![i as i32]));
-                let names = Arc::new(StringArray::from(vec!["test"]));
+                let ids = Arc::new(Int32Array::from_slice(vec![i as i32]));
+                let names = Arc::new(Utf8Array::<i32>::from_slice(vec!["test"]));
                 let rec_batch =
                     RecordBatch::try_new(schema.clone(), vec![ids, names]).unwrap();
 
@@ -4199,7 +4199,7 @@ mod tests {
     ) -> Result<()> {
         let logical_plan = ctx.create_logical_plan(sql)?;
         let logical_plan = ctx.optimize(&logical_plan)?;
-        let physical_plan = ctx.create_physical_plan(&logical_plan)?;
+        let physical_plan = ctx.create_physical_plan(&logical_plan).await?;
 
         let options = options.unwrap_or_else(|| parquet::write::WriteOptions {
             compression: parquet::write::Compression::Uncompressed,

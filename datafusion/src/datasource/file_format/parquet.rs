@@ -332,7 +332,7 @@ mod tests {
 
     use super::*;
     use arrow::array::{
-        BinaryArray, BooleanArray, Float32Array, Float64Array, Int32Array,
+        BinaryArray, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
     };
     use futures::StreamExt;
 

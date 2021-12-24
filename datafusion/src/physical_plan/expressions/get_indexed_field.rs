@@ -121,10 +121,10 @@ mod tests {
     use super::*;
     use crate::error::Result;
     use crate::physical_plan::expressions::{col, lit};
-    use arrow::array::TryExtend;
     use arrow::array::{
         Int64Array, MutableListArray, MutableUtf8Array, StructArray, Utf8Array,
     };
+    use arrow::array::{TryExtend, TryPush};
     use arrow::datatypes::Field;
 
     fn build_utf8_lists(list_of_lists: Vec<Vec<Option<&str>>>) -> ListArray<i32> {

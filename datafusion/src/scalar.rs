@@ -1895,7 +1895,9 @@ mod tests {
             ScalarValue::Decimal128(Some(3), 10, 2),
             ScalarValue::Decimal128(None, 10, 2),
         ];
-        let array = ScalarValue::iter_to_array(decimal_vec.into_iter()).unwrap();
+        let array: ArrayRef = ScalarValue::iter_to_array(decimal_vec.into_iter())
+            .unwrap()
+            .into();
         assert_eq!(4, array.len());
         assert_eq!(DataType::Decimal(10, 2), array.data_type().clone());
 
@@ -2557,7 +2559,7 @@ mod tests {
                 ),
             ]),
         ];
-        let array = ScalarValue::iter_to_array(scalars).unwrap();
+        let array: ArrayRef = ScalarValue::iter_to_array(scalars).unwrap().into();
 
         let expected = Arc::new(StructArray::from_data(
             dt,
