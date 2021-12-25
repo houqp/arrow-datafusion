@@ -327,11 +327,9 @@ mod tests {
             None,
             None,
         ];
-
         let mut array = MutableListArray::<i32, MutableUtf8Array<i32>>::new();
         array.try_extend(expected)?;
         let expected: ListArray<i32> = array.into();
-
         let re = regexp_match::<i32>(&[Arc::new(values), Arc::new(patterns)]).unwrap();
 
         assert_eq!(re.as_ref(), &expected);
@@ -355,7 +353,6 @@ mod tests {
         let mut array = MutableListArray::<i32, MutableUtf8Array<i32>>::new();
         array.try_extend(expected)?;
         let expected: ListArray<i32> = array.into();
-
         let re =
             regexp_match::<i32>(&[Arc::new(values), Arc::new(patterns), Arc::new(flags)])
                 .unwrap();

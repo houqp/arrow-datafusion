@@ -479,8 +479,6 @@ mod tests {
     use parquet::metadata::{ColumnChunkMetaData, SchemaDescriptor};
     use parquet::statistics::ParquetStatistics;
 
-    type SchemaDescPtr = Arc<SchemaDescriptor>;
-
     #[tokio::test]
     async fn parquet_exec_with_projection() -> Result<()> {
         let testdata = crate::test_util::parquet_test_data();
@@ -783,20 +781,4 @@ mod tests {
             .build()
             .unwrap()
     }
-
-    // fn get_test_schema_descr(fields: Vec<(&str, PhysicalType)>) -> SchemaDescPtr {
-    //     use parquet::schema::types::{Type as SchemaType};
-    //     let mut schema_fields = fields
-    //         .iter()
-    //         .map(|(n, t)| {
-    //             Arc::new(SchemaType::primitive_type_builder(n, *t).build().unwrap())
-    //         })
-    //         .collect::<Vec<_>>();
-    //     let schema = SchemaType::group_type_builder("schema")
-    //         .with_fields(&mut schema_fields)
-    //         .build()
-    //         .unwrap();
-    //
-    //     Arc::new(to_parquet_schema(schema))
-    // }
 }
