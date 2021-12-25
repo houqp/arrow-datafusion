@@ -320,17 +320,17 @@ mod tests {
         let values = StringArray::from_slice(vec!["abc"; 5]);
         let patterns =
             StringArray::from_slice(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
+        let expected = vec![
+            Some(vec![Some("a")]),
+            None,
+            Some(vec![Some("b")]),
+            None,
+            None,
+        ];
 
-        let elem_builder: GenericStringBuilder<i32> = GenericStringBuilder::new(0);
-        let mut expected_builder = ListBuilder::new(elem_builder);
-        expected_builder.values().append_value("a").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.append(false).unwrap();
-        expected_builder.values().append_value("b").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.append(false).unwrap();
-        expected_builder.append(false).unwrap();
-        let expected = expected_builder.finish();
+        let mut array = MutableListArray::<i32, MutableUtf8Array<i32>>::new();
+        array.try_extend(expected)?;
+        let expected: ListArray<i32> = array.into();
 
         let re = regexp_match::<i32>(&[Arc::new(values), Arc::new(patterns)]).unwrap();
 
@@ -344,18 +344,17 @@ mod tests {
             StringArray::from_slice(vec!["^(a)", "^(A)", "(b|d)", "(B|D)", "^(b|c)"]);
         let flags = StringArray::from_slice(vec!["i"; 5]);
 
-        let elem_builder: GenericStringBuilder<i32> = GenericStringBuilder::new(0);
-        let mut expected_builder = MutableListArray::new(elem_builder);
-        expected_builder.values().append_value("a").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.values().append_value("a").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.values().append_value("b").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.values().append_value("b").unwrap();
-        expected_builder.append(true).unwrap();
-        expected_builder.append(false).unwrap();
-        let expected = expected_builder.finish();
+        let expected = vec![
+            Some(vec![Some("a")]),
+            Some(vec![Some("a")]),
+            Some(vec![Some("b")]),
+            Some(vec![Some("b")]),
+            None,
+        ];
+
+        let mut array = MutableListArray::<i32, MutableUtf8Array<i32>>::new();
+        array.try_extend(expected)?;
+        let expected: ListArray<i32> = array.into();
 
         let re =
             regexp_match::<i32>(&[Arc::new(values), Arc::new(patterns), Arc::new(flags)])

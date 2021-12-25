@@ -1249,6 +1249,10 @@ mod tests {
     use arrow::array::*;
     use arrow::compute::arithmetics::basic::add;
     use arrow::datatypes::*;
+    use arrow::io::parquet::write::{
+        to_parquet_schema, write_file, Compression, Encoding, RowGroupIterator, Version,
+        WriteOptions,
+    };
     use arrow::record_batch::RecordBatch;
     use async_trait::async_trait;
     use std::fs::File;
@@ -4094,10 +4098,13 @@ mod tests {
             for (i, schema) in schemas.iter().enumerate().take(2) {
                 let filename = format!("part-{}.parquet", i);
                 let path = table_path.join(&filename);
-                let file = fs::File::create(path).unwrap();
-                let mut writer =
-                    ArrowWriter::try_new(file.try_clone().unwrap(), schema.clone(), None)
-                        .unwrap();
+                let mut file = fs::File::create(path).unwrap();
+
+                let options = WriteOptions {
+                    write_statistics: true,
+                    compression: Compression::Uncompressed,
+                    version: Version::V2,
+                };
 
                 // create mock record batch
                 let ids = Arc::new(Int32Array::from_slice(vec![i as i32]));
@@ -4105,8 +4112,24 @@ mod tests {
                 let rec_batch =
                     RecordBatch::try_new(schema.clone(), vec![ids, names]).unwrap();
 
-                writer.write(&rec_batch).unwrap();
-                writer.close().unwrap();
+                let schema_ref = schema.as_ref();
+                let parquet_schema = to_parquet_schema(schema_ref).unwrap();
+                let iter = vec![Ok(rec_batch)];
+                let row_groups = RowGroupIterator::try_new(
+                    iter.into_iter(),
+                    schema_ref,
+                    options,
+                    vec![Encoding::Plain],
+                )?;
+
+                let _ = write_file(
+                    &mut file,
+                    row_groups,
+                    schema_ref,
+                    parquet_schema,
+                    options,
+                    None,
+                )?;
             }
         }
 

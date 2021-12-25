@@ -409,9 +409,6 @@ mod tests {
             .map(|column| column.slice(offset, length))
             .collect();
 
-        Self {
-            schema,
-            columns,
-        }
+        Self { schema, columns }
     }
 }
