@@ -21,8 +21,9 @@ use std::any::Any;
 use std::sync::Arc;
 
 use crate::error::{DataFusionError, Result};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::physical_plan::{
-    memory::MemoryStream, DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
+    DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
 };
 use arrow::array::NullArray;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -109,20 +110,14 @@ impl ExecutionPlan for EmptyExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        // GlobalLimitExec has a single output partition
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
                 "EmptyExec invalid partition {} (expected 0)",
                 partition
             )));
         }
-
-        Ok(Box::pin(MemoryStream::try_new(
-            self.data()?,
-            self.schema.clone(),
-            None,
-        )?))
+        consumer.finish()
     }
 
     fn fmt_as(
@@ -141,7 +136,7 @@ impl ExecutionPlan for EmptyExec {
         let batch = self
             .data()
             .expect("Create empty RecordBatch should not fail");
-        common::compute_record_batch_statistics(&[batch], &self.schema, None)
+        common::compute_record_batch_statistics([batch.as_slice()], &self.schema, None)
     }
 }
 

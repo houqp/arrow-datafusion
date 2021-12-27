@@ -24,6 +24,7 @@ use std::{any::Any, convert::TryInto};
 use crate::datasource::file_format::parquet::ChunkObjectReader;
 use crate::datasource::object_store::ObjectStore;
 use crate::datasource::PartitionedFile;
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::{
     error::{DataFusionError, Result},
     logical_plan::{Column, Expr},
@@ -32,11 +33,11 @@ use crate::{
         file_format::PhysicalPlanConfig,
         metrics::{self, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
         stream::RecordBatchReceiverStream,
-        DisplayFormatType, ExecutionPlan, Partitioning, SendableRecordBatchStream,
-        Statistics,
+        DisplayFormatType, ExecutionPlan, Partitioning, Statistics,
     },
     scalar::ScalarValue,
 };
+use futures::StreamExt;
 
 use arrow::{
     array::ArrayRef,
@@ -186,7 +187,11 @@ impl ExecutionPlan for ParquetExec {
         }
     }
 
-    async fn execute(&self, partition_index: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(
+        &self,
+        partition_index: usize,
+        consumer: &mut dyn Consumer,
+    ) -> Result<()> {
         // because the parquet implementation is not thread-safe, it is necessary to execute
         // on a thread and communicate with channels
         let (response_tx, response_rx): (
@@ -226,11 +231,18 @@ impl ExecutionPlan for ParquetExec {
             }
         });
 
-        Ok(RecordBatchReceiverStream::create(
+        let mut stream = RecordBatchReceiverStream::create(
             &self.projected_schema,
             response_rx,
             join_handle,
-        ))
+        );
+        while let Some(result) = stream.next().await {
+            let batch = result?;
+            if consumer.consume(batch)? == ConsumeStatus::Terminate {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn fmt_as(
@@ -469,7 +481,6 @@ mod tests {
 
     use super::*;
     use arrow::datatypes::{DataType, Field};
-    use futures::StreamExt;
     use parquet::{
         basic::Type as PhysicalType,
         file::{metadata::RowGroupMetaData, statistics::Statistics as ParquetStatistics},

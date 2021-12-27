@@ -66,32 +66,23 @@ impl MemTable {
         batch_size: usize,
         output_partitions: Option<usize>,
     ) -> Result<Self> {
+        //TODO: why not plug scan_exec directly into repartition exec?
+
+        // collect record batches from table provider
         let schema = t.schema();
-        let exec = t.scan(&None, batch_size, &[], None).await?;
-        let partition_count = exec.output_partitioning().partition_count();
+        let scan_exec = t.scan(&None, batch_size, &[], None).await?;
+        let partition_count = scan_exec.output_partitioning().partition_count();
 
-        let tasks = (0..partition_count)
-            .map(|part_i| {
-                let exec = exec.clone();
-                tokio::spawn(async move {
-                    let stream = exec.execute(part_i).await?;
-                    common::collect(stream).await
-                })
-            })
-            // this collect *is needed* so that the join below can
-            // switch between tasks
-            .collect::<Vec<_>>();
-
-        let mut data: Vec<Vec<RecordBatch>> =
-            Vec::with_capacity(exec.output_partitioning().partition_count());
-        for task in tasks {
-            let result = task.await.expect("MemTable::load could not join task")?;
-            data.push(result);
+        let mut data: Vec<Vec<RecordBatch>> = Vec::with_capacity(partition_count);
+        for i in (0..partition_count) {
+            let mut batches = vec![];
+            scan_exec.execute(i, &mut batches).await?;
+            data.push(batches);
         }
 
-        let exec = MemoryExec::try_new(&data, schema.clone(), None)?;
-
+        // repartition record batches to specified output count
         if let Some(num_partitions) = output_partitions {
+            let exec = MemoryExec::try_new(data, schema.clone(), None)?;
             let exec = RepartitionExec::try_new(
                 Arc::new(exec),
                 Partitioning::RoundRobinBatch(num_partitions),
@@ -100,18 +91,16 @@ impl MemTable {
             // execute and collect results
             let mut output_partitions = vec![];
             for i in 0..exec.output_partitioning().partition_count() {
-                // execute this *output* partition and collect all batches
-                let mut stream = exec.execute(i).await?;
                 let mut batches = vec![];
-                while let Some(result) = stream.next().await {
-                    batches.push(result?);
-                }
+                // execute this *output* partition and collect all batches
+                exec.execute(i, &mut batches).await?;
                 output_partitions.push(batches);
             }
 
-            return MemTable::try_new(schema.clone(), output_partitions);
+            MemTable::try_new(schema.clone(), output_partitions)
+        } else {
+            MemTable::try_new(schema.clone(), data)
         }
-        MemTable::try_new(schema.clone(), data)
     }
 }
 
@@ -133,7 +122,7 @@ impl TableProvider for MemTable {
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(MemoryExec::try_new(
-            &self.batches.clone(),
+            self.batches.clone(),
             self.schema(),
             projection.clone(),
         )?))

@@ -106,6 +106,7 @@ pub struct Statistics {
     /// if false, any field that is `Some(..)` may contain an inexact estimate and may not be the actual value.
     pub is_exact: bool,
 }
+
 /// This table statistics are estimates about column
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnStatistics {
@@ -117,6 +118,28 @@ pub struct ColumnStatistics {
     pub min_value: Option<ScalarValue>,
     /// Number of distinct values
     pub distinct_count: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConsumeStatus {
+    Continue,
+    Terminate,
+}
+
+pub trait Consumer: Send {
+    // consumer that can trigger early termination like Limit exec should leverage try_consume
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus>;
+
+    fn finish(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl Consumer for Vec<RecordBatch> {
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+        self.push(batch);
+        Ok(ConsumeStatus::Continue)
+    }
 }
 
 /// `ExecutionPlan` represent nodes in the DataFusion Physical Plan.
@@ -154,7 +177,7 @@ pub trait ExecutionPlan: Debug + Send + Sync {
     ) -> Result<Arc<dyn ExecutionPlan>>;
 
     /// creates an iterator
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream>;
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()>;
 
     /// Return a snapshot of the set of [`Metric`]s for this
     /// [`ExecutionPlan`].
@@ -311,49 +334,37 @@ pub fn visit_execution_plan<V: ExecutionPlanVisitor>(
 
 /// Execute the [ExecutionPlan] and collect the results in memory
 pub async fn collect(plan: Arc<dyn ExecutionPlan>) -> Result<Vec<RecordBatch>> {
-    let stream = execute_stream(plan).await?;
-    common::collect(stream).await
-}
+    let mut batches = Vec::new();
 
-/// Execute the [ExecutionPlan] and return a single stream of results
-pub async fn execute_stream(
-    plan: Arc<dyn ExecutionPlan>,
-) -> Result<SendableRecordBatchStream> {
     match plan.output_partitioning().partition_count() {
-        0 => Ok(Box::pin(EmptyRecordBatchStream::new(plan.schema()))),
-        1 => plan.execute(0).await,
+        0 => {}
+        1 => plan.execute(0, &mut batches).await?,
         _ => {
             // merge into a single partition
             let plan = CoalescePartitionsExec::new(plan.clone());
             // CoalescePartitionsExec must produce a single partition
             assert_eq!(1, plan.output_partitioning().partition_count());
-            plan.execute(0).await
+            plan.execute(0, &mut batches).await?;
         }
     }
+
+    Ok(batches)
 }
 
 /// Execute the [ExecutionPlan] and collect the results in memory
 pub async fn collect_partitioned(
     plan: Arc<dyn ExecutionPlan>,
 ) -> Result<Vec<Vec<RecordBatch>>> {
-    let streams = execute_stream_partitioned(plan).await?;
-    let mut batches = Vec::with_capacity(streams.len());
-    for stream in streams {
-        batches.push(common::collect(stream).await?);
-    }
-    Ok(batches)
-}
-
-/// Execute the [ExecutionPlan] and return a vec with one stream per output partition
-pub async fn execute_stream_partitioned(
-    plan: Arc<dyn ExecutionPlan>,
-) -> Result<Vec<SendableRecordBatchStream>> {
     let num_partitions = plan.output_partitioning().partition_count();
-    let mut streams = Vec::with_capacity(num_partitions);
+    let mut partitions = Vec::<Vec<RecordBatch>>::with_capacity(num_partitions);
+
     for i in 0..num_partitions {
-        streams.push(plan.execute(i).await?);
+        let mut batches = Vec::new();
+        plan.execute(i, &mut batches).await?;
+        partitions.push(batches);
     }
-    Ok(streams)
+
+    Ok(partitions)
 }
 
 /// Partitioning schemes supported by operators.

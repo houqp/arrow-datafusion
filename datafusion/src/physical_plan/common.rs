@@ -74,13 +74,13 @@ impl RecordBatchStream for SizedRecordBatchStream {
     }
 }
 
-/// Create a vector of record batches from a stream
-pub async fn collect(stream: SendableRecordBatchStream) -> Result<Vec<RecordBatch>> {
-    stream
-        .try_collect::<Vec<_>>()
-        .await
-        .map_err(DataFusionError::from)
-}
+// /// Create a vector of record batches from a stream
+// pub async fn collect(stream: SendableRecordBatchStream) -> Result<Vec<RecordBatch>> {
+//     stream
+//         .try_collect::<Vec<_>>()
+//         .await
+//         .map_err(DataFusionError::from)
+// }
 
 /// Combine a slice of record batches into one, or returns None if the slice itself
 /// is empty; all the record batches inside the slice must be of the same schema.
@@ -158,49 +158,17 @@ fn build_file_list_recurse(
     Ok(())
 }
 
-/// Spawns a task to the tokio threadpool and writes its outputs to the provided mpsc sender
-pub(crate) fn spawn_execution(
-    input: Arc<dyn ExecutionPlan>,
-    mut output: mpsc::Sender<ArrowResult<RecordBatch>>,
-    partition: usize,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut stream = match input.execute(partition).await {
-            Err(e) => {
-                // If send fails, plan being torn
-                // down, no place to send the error
-                let arrow_error = ArrowError::ExternalError(Box::new(e));
-                output.send(Err(arrow_error)).await.ok();
-                return;
-            }
-            Ok(stream) => stream,
-        };
-
-        while let Some(item) = stream.next().await {
-            // If send fails, plan being torn down,
-            // there is no place to send the error
-            output.send(item).await.ok();
-        }
-    })
-}
-
 /// Computes the statistics for an in-memory RecordBatch
 ///
 /// Only computes statistics that are in arrows metadata (num rows, byte size and nulls)
 /// and does not apply any kernel on the actual data.
-pub fn compute_record_batch_statistics(
-    batches: &[Vec<RecordBatch>],
-    schema: &Schema,
+pub fn compute_record_batch_statistics<'a, 'b>(
+    batches: impl IntoIterator<Item = &'a [RecordBatch]>,
+    schema: &'b Schema,
     projection: Option<Vec<usize>>,
 ) -> Statistics {
-    let nb_rows = batches.iter().flatten().map(RecordBatch::num_rows).sum();
-
-    let total_byte_size = batches
-        .iter()
-        .flatten()
-        .flat_map(RecordBatch::columns)
-        .map(|a| a.get_array_memory_size())
-        .sum();
+    let mut nb_rows = 0;
+    let mut total_byte_size = 0;
 
     let projection = match projection {
         Some(p) => p,
@@ -209,8 +177,14 @@ pub fn compute_record_batch_statistics(
 
     let mut column_statistics = vec![ColumnStatistics::default(); projection.len()];
 
-    for partition in batches.iter() {
+    for partition in batches.into_iter() {
         for batch in partition {
+            nb_rows += RecordBatch::num_rows(batch);
+            total_byte_size += RecordBatch::columns(batch)
+                .iter()
+                .map(|a| a.get_array_memory_size())
+                .sum::<usize>();
+
             for (stat_index, col_index) in projection.iter().enumerate() {
                 *column_statistics[stat_index].null_count.get_or_insert(0) +=
                     batch.column(*col_index).null_count();

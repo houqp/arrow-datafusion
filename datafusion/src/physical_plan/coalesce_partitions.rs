@@ -34,10 +34,10 @@ use super::common::AbortOnDropMany;
 use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{RecordBatchStream, Statistics};
 use crate::error::{DataFusionError, Result};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning};
 
 use super::SendableRecordBatchStream;
-use crate::physical_plan::common::spawn_execution;
 use pin_project_lite::pin_project;
 
 /// Merge execution plan executes partitions in parallel and combines them into a single
@@ -97,7 +97,7 @@ impl ExecutionPlan for CoalescePartitionsExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         // CoalescePartitionsExec produces a single partition
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
@@ -113,7 +113,7 @@ impl ExecutionPlan for CoalescePartitionsExec {
             )),
             1 => {
                 // bypass any threading / metrics if there is a single partition
-                self.input.execute(0).await
+                self.input.execute(0, consumer).await
             }
             _ => {
                 let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
@@ -122,29 +122,11 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 let elapsed_compute = baseline_metrics.elapsed_compute().clone();
                 let _timer = elapsed_compute.timer();
 
-                // use a stream that allows each sender to put in at
-                // least one result in an attempt to maximize
-                // parallelism.
-                let (sender, receiver) =
-                    mpsc::channel::<ArrowResult<RecordBatch>>(input_partitions);
-
-                // spawn independent tasks whose resulting streams (of batches)
-                // are sent to the channel for consumption.
-                let mut join_handles = Vec::with_capacity(input_partitions);
                 for part_i in 0..input_partitions {
-                    join_handles.push(spawn_execution(
-                        self.input.clone(),
-                        sender.clone(),
-                        part_i,
-                    ));
+                    // FIXME: execute in parallel
+                    self.input.execute(part_i, consumer).await?;
                 }
-
-                Ok(Box::pin(MergeStream {
-                    input: receiver,
-                    schema: self.schema(),
-                    baseline_metrics,
-                    drop_helper: AbortOnDropMany(join_handles),
-                }))
+                Ok(())
             }
         }
     }
@@ -167,35 +149,6 @@ impl ExecutionPlan for CoalescePartitionsExec {
 
     fn statistics(&self) -> Statistics {
         self.input.statistics()
-    }
-}
-
-pin_project! {
-    struct MergeStream {
-        schema: SchemaRef,
-        #[pin]
-        input: mpsc::Receiver<ArrowResult<RecordBatch>>,
-        baseline_metrics: BaselineMetrics,
-        drop_helper: AbortOnDropMany<()>,
-    }
-}
-
-impl Stream for MergeStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        let poll = this.input.poll_next(cx);
-        this.baseline_metrics.record_poll(poll)
-    }
-}
-
-impl RecordBatchStream for MergeStream {
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
     }
 }
 

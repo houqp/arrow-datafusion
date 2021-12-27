@@ -32,9 +32,7 @@ use crate::{
 };
 
 use crate::arrow::util::pretty;
-use crate::physical_plan::{
-    execute_stream, execute_stream_partitioned, ExecutionPlan, SendableRecordBatchStream,
-};
+use crate::physical_plan::{ExecutionPlan, SendableRecordBatchStream};
 use crate::sql::utils::find_window_exprs;
 use async_trait::async_trait;
 
@@ -177,12 +175,12 @@ impl DataFrame for DataFrameImpl {
         Ok(pretty::print_batches(&results)?)
     }
 
-    /// Convert the logical plan represented by this DataFrame into a physical plan and
-    /// execute it, returning a stream over a single partition
-    async fn execute_stream(&self) -> Result<SendableRecordBatchStream> {
-        let plan = self.create_physical_plan().await?;
-        execute_stream(plan).await
-    }
+    // /// Convert the logical plan represented by this DataFrame into a physical plan and
+    // /// execute it, returning a stream over a single partition
+    // async fn execute_stream(&self) -> Result<SendableRecordBatchStream> {
+    //     let plan = self.create_physical_plan().await?;
+    //     execute_stream(plan).await
+    // }
 
     /// Convert the logical plan represented by this DataFrame into a physical plan and
     /// execute it, collecting all resulting batches into memory while maintaining
@@ -192,12 +190,12 @@ impl DataFrame for DataFrameImpl {
         Ok(collect_partitioned(plan).await?)
     }
 
-    /// Convert the logical plan represented by this DataFrame into a physical plan and
-    /// execute it, returning a stream for each partition
-    async fn execute_stream_partitioned(&self) -> Result<Vec<SendableRecordBatchStream>> {
-        let plan = self.create_physical_plan().await?;
-        Ok(execute_stream_partitioned(plan).await?)
-    }
+    // /// Convert the logical plan represented by this DataFrame into a physical plan and
+    // /// execute it, returning a stream for each partition
+    // async fn execute_stream_partitioned(&self) -> Result<Vec<SendableRecordBatchStream>> {
+    //     let plan = self.create_physical_plan().await?;
+    //     Ok(execute_stream_partitioned(plan).await?)
+    // }
 
     /// Returns the schema from the logical plan
     fn schema(&self) -> &DFSchema {

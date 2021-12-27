@@ -27,6 +27,7 @@ use super::{
     SendableRecordBatchStream, Statistics,
 };
 use crate::error::{DataFusionError, Result};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use arrow::datatypes::{Field, Schema, SchemaRef};
 use arrow::error::Result as ArrowResult;
 use arrow::record_batch::RecordBatch;
@@ -51,6 +52,41 @@ impl fmt::Debug for MemoryExec {
         write!(f, "partitions: [...]")?;
         write!(f, "schema: {:?}", self.projected_schema)?;
         write!(f, "projection: {:?}", self.projection)
+    }
+}
+
+impl MemoryExec {
+    /// Create a new execution plan for reading in-memory record batches
+    /// The provided `schema` should not have the projection applied.
+    pub fn try_new(
+        partitions: Vec<Vec<RecordBatch>>,
+        schema: SchemaRef,
+        projection: Option<Vec<usize>>,
+    ) -> Result<Self> {
+        let projected_schema = match &projection {
+            Some(columns) => {
+                let fields: Result<Vec<Field>> = columns
+                    .iter()
+                    .map(|i| {
+                        if *i < schema.fields().len() {
+                            Ok(schema.field(*i).clone())
+                        } else {
+                            Err(DataFusionError::Internal(
+                                "Projection index out of range".to_string(),
+                            ))
+                        }
+                    })
+                    .collect();
+                Arc::new(Schema::new(fields?))
+            }
+            None => Arc::clone(&schema),
+        };
+        Ok(Self {
+            partitions: partitions,
+            schema,
+            projected_schema,
+            projection,
+        })
     }
 }
 
@@ -86,12 +122,31 @@ impl ExecutionPlan for MemoryExec {
         )))
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(MemoryStream::try_new(
-            self.partitions[partition].clone(),
-            self.projected_schema.clone(),
-            self.projection.clone(),
-        )?))
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        let partition = &self.partitions[partition];
+        // apply projection
+        match &self.projection {
+            Some(columns) => {
+                for batch in partition {
+                    let projected_batch = RecordBatch::try_new(
+                        self.projected_schema.clone(),
+                        columns.iter().map(|i| batch.column(*i).clone()).collect(),
+                    )?;
+                    if consumer.consume(projected_batch)? == ConsumeStatus::Terminate {
+                        break;
+                    }
+                }
+            }
+            None => {
+                for batch in partition {
+                    if consumer.consume(batch.clone())? == ConsumeStatus::Terminate {
+                        break;
+                    }
+                }
+            }
+        }
+        consumer.finish()?;
+        Ok(())
     }
 
     fn fmt_as(
@@ -116,108 +171,10 @@ impl ExecutionPlan for MemoryExec {
     /// We recompute the statistics dynamically from the arrow metadata as it is pretty cheap to do so
     fn statistics(&self) -> Statistics {
         common::compute_record_batch_statistics(
-            &self.partitions,
+            self.partitions.iter().map(|v| v.as_slice()),
             &self.schema,
             self.projection.clone(),
         )
-    }
-}
-
-impl MemoryExec {
-    /// Create a new execution plan for reading in-memory record batches
-    /// The provided `schema` should not have the projection applied.
-    pub fn try_new(
-        partitions: &[Vec<RecordBatch>],
-        schema: SchemaRef,
-        projection: Option<Vec<usize>>,
-    ) -> Result<Self> {
-        let projected_schema = match &projection {
-            Some(columns) => {
-                let fields: Result<Vec<Field>> = columns
-                    .iter()
-                    .map(|i| {
-                        if *i < schema.fields().len() {
-                            Ok(schema.field(*i).clone())
-                        } else {
-                            Err(DataFusionError::Internal(
-                                "Projection index out of range".to_string(),
-                            ))
-                        }
-                    })
-                    .collect();
-                Arc::new(Schema::new(fields?))
-            }
-            None => Arc::clone(&schema),
-        };
-        Ok(Self {
-            partitions: partitions.to_vec(),
-            schema,
-            projected_schema,
-            projection,
-        })
-    }
-}
-
-/// Iterator over batches
-pub(crate) struct MemoryStream {
-    /// Vector of record batches
-    data: Vec<RecordBatch>,
-    /// Schema representing the data
-    schema: SchemaRef,
-    /// Optional projection for which columns to load
-    projection: Option<Vec<usize>>,
-    /// Index into the data
-    index: usize,
-}
-
-impl MemoryStream {
-    /// Create an iterator for a vector of record batches
-    pub fn try_new(
-        data: Vec<RecordBatch>,
-        schema: SchemaRef,
-        projection: Option<Vec<usize>>,
-    ) -> Result<Self> {
-        Ok(Self {
-            data,
-            schema,
-            projection,
-            index: 0,
-        })
-    }
-}
-
-impl Stream for MemoryStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Poll::Ready(if self.index < self.data.len() {
-            self.index += 1;
-            let batch = &self.data[self.index - 1];
-            // apply projection
-            match &self.projection {
-                Some(columns) => Some(RecordBatch::try_new(
-                    self.schema.clone(),
-                    columns.iter().map(|i| batch.column(*i).clone()).collect(),
-                )),
-                None => Some(Ok(batch.clone())),
-            }
-        } else {
-            None
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.data.len(), Some(self.data.len()))
-    }
-}
-
-impl RecordBatchStream for MemoryStream {
-    /// Get the schema
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
     }
 }
 

@@ -278,20 +278,20 @@ pub trait DataFrame: Send + Sync {
     /// ```
     async fn show_limit(&self, n: usize) -> Result<()>;
 
-    /// Executes this DataFrame and returns a stream over a single partition
-    ///
-    /// ```
-    /// # use datafusion::prelude::*;
-    /// # use datafusion::error::Result;
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<()> {
-    /// let mut ctx = ExecutionContext::new();
-    /// let df = ctx.read_csv("tests/example.csv", CsvReadOptions::new()).await?;
-    /// let stream = df.execute_stream().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    async fn execute_stream(&self) -> Result<SendableRecordBatchStream>;
+    // /// Executes this DataFrame and returns a stream over a single partition
+    // ///
+    // /// ```
+    // /// # use datafusion::prelude::*;
+    // /// # use datafusion::error::Result;
+    // /// # #[tokio::main]
+    // /// # async fn main() -> Result<()> {
+    // /// let mut ctx = ExecutionContext::new();
+    // /// let df = ctx.read_csv("tests/example.csv", CsvReadOptions::new()).await?;
+    // /// let stream = df.execute_stream().await?;
+    // /// # Ok(())
+    // /// # }
+    // /// ```
+    // async fn execute_stream(&self) -> Result<SendableRecordBatchStream>;
 
     /// Executes this DataFrame and collects all results into a vector of vector of RecordBatch
     /// maintaining the input partitioning.
@@ -309,20 +309,20 @@ pub trait DataFrame: Send + Sync {
     /// ```
     async fn collect_partitioned(&self) -> Result<Vec<Vec<RecordBatch>>>;
 
-    /// Executes this DataFrame and returns one stream per partition.
-    ///
-    /// ```
-    /// # use datafusion::prelude::*;
-    /// # use datafusion::error::Result;
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<()> {
-    /// let mut ctx = ExecutionContext::new();
-    /// let df = ctx.read_csv("tests/example.csv", CsvReadOptions::new()).await?;
-    /// let batches = df.execute_stream_partitioned().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    async fn execute_stream_partitioned(&self) -> Result<Vec<SendableRecordBatchStream>>;
+    // /// Executes this DataFrame and returns one stream per partition.
+    // ///
+    // /// ```
+    // /// # use datafusion::prelude::*;
+    // /// # use datafusion::error::Result;
+    // /// # #[tokio::main]
+    // /// # async fn main() -> Result<()> {
+    // /// let mut ctx = ExecutionContext::new();
+    // /// let df = ctx.read_csv("tests/example.csv", CsvReadOptions::new()).await?;
+    // /// let batches = df.execute_stream_partitioned().await?;
+    // /// # Ok(())
+    // /// # }
+    // /// ```
+    // async fn execute_stream_partitioned(&self) -> Result<Vec<SendableRecordBatchStream>>;
 
     /// Returns the schema describing the output of this DataFrame in terms of columns returned,
     /// where each column has a name, data type, and nullability attribute.

@@ -27,6 +27,7 @@ use crate::physical_plan::expressions::PhysicalSortExpr;
 use crate::physical_plan::{
     common, DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 pub use arrow::compute::SortOptions;
 use arrow::compute::{lexsort_to_indices, take, SortColumn, TakeOptions};
 use arrow::datatypes::SchemaRef;
@@ -137,7 +138,7 @@ impl ExecutionPlan for SortExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         if !self.preserve_partitioning {
             if 0 != partition {
                 return Err(DataFusionError::Internal(format!(
@@ -154,14 +155,26 @@ impl ExecutionPlan for SortExec {
             }
         }
 
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let input = self.input.execute(partition).await?;
+        // materialize batches before push down
+        let mut batches = vec![];
+        let input_schema = self.input.schema();
+        self.input.execute(partition, &mut batches).await?;
 
-        Ok(Box::pin(SortStream::new(
-            input,
-            self.expr.clone(),
-            baseline_metrics,
-        )))
+        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let timer = baseline_metrics.elapsed_compute().timer();
+        // combine all record batches into one for each column
+        let combined = common::combine_batches(&batches, input_schema.clone())?;
+        // sort combined record batch
+        let result = combined
+            .map(|batch| sort_batch(batch, input_schema, &self.expr))
+            .transpose()?
+            .record_output(&baseline_metrics);
+        timer.done();
+
+        if let Some(batch) = result {
+            consumer.consume(batch)?;
+        }
+        consumer.finish()
     }
 
     fn fmt_as(
@@ -220,91 +233,6 @@ fn sort_batch(
             })
             .collect::<ArrowResult<Vec<ArrayRef>>>()?,
     )
-}
-
-pin_project! {
-    /// stream for sort plan
-    struct SortStream {
-        #[pin]
-        output: futures::channel::oneshot::Receiver<ArrowResult<Option<RecordBatch>>>,
-        finished: bool,
-        schema: SchemaRef,
-        drop_helper: AbortOnDropSingle<()>,
-    }
-}
-
-impl SortStream {
-    fn new(
-        input: SendableRecordBatchStream,
-        expr: Vec<PhysicalSortExpr>,
-        baseline_metrics: BaselineMetrics,
-    ) -> Self {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let schema = input.schema();
-        let join_handle = tokio::spawn(async move {
-            let schema = input.schema();
-            let sorted_batch = common::collect(input)
-                .await
-                .map_err(DataFusionError::into_arrow_external_error)
-                .and_then(move |batches| {
-                    let timer = baseline_metrics.elapsed_compute().timer();
-                    // combine all record batches into one for each column
-                    let combined = common::combine_batches(&batches, schema.clone())?;
-                    // sort combined record batch
-                    let result = combined
-                        .map(|batch| sort_batch(batch, schema, &expr))
-                        .transpose()?
-                        .record_output(&baseline_metrics);
-                    timer.done();
-                    Ok(result)
-                });
-
-            // failing here is OK, the receiver is gone and does not care about the result
-            tx.send(sorted_batch).ok();
-        });
-
-        Self {
-            output: rx,
-            finished: false,
-            schema,
-            drop_helper: AbortOnDropSingle::new(join_handle),
-        }
-    }
-}
-
-impl Stream for SortStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.finished {
-            return Poll::Ready(None);
-        }
-
-        // is the output ready?
-        let this = self.project();
-        let output_poll = this.output.poll(cx);
-
-        match output_poll {
-            Poll::Ready(result) => {
-                *this.finished = true;
-
-                // check for error in receiving channel and unwrap actual result
-                let result = match result {
-                    Err(e) => Some(Err(ArrowError::ExternalError(Box::new(e)))), // error receiving
-                    Ok(result) => result.transpose(),
-                };
-
-                Poll::Ready(result)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl RecordBatchStream for SortStream {
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
 }
 
 #[cfg(test)]

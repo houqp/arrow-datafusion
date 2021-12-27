@@ -19,9 +19,8 @@
 use async_trait::async_trait;
 
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::{
-    DisplayFormatType, ExecutionPlan, Partitioning, SendableRecordBatchStream, Statistics,
-};
+use crate::physical_plan::{ConsumeStatus, Consumer};
+use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning, Statistics};
 use arrow::{datatypes::SchemaRef, json};
 use std::any::Any;
 use std::sync::Arc;
@@ -82,7 +81,7 @@ impl ExecutionPlan for NdJsonExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         let proj = self.base_config.projected_file_column_names();
 
         let batch_size = self.base_config.batch_size;
@@ -98,14 +97,16 @@ impl ExecutionPlan for NdJsonExec {
             )) as BatchIter
         };
 
-        Ok(Box::pin(FileStream::new(
+        FileStream::new(
             Arc::clone(&self.base_config.object_store),
             self.base_config.file_groups[partition].clone(),
             fun,
             Arc::clone(&self.projected_schema),
             self.base_config.limit,
             self.base_config.table_partition_cols.clone(),
-        )))
+        )
+        .produce(consumer)
+        .await
     }
 
     fn fmt_as(

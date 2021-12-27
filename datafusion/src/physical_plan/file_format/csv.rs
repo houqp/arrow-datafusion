@@ -18,9 +18,8 @@
 //! Execution plan for reading CSV files
 
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::{
-    DisplayFormatType, ExecutionPlan, Partitioning, SendableRecordBatchStream, Statistics,
-};
+use crate::physical_plan::{ConsumeStatus, Consumer};
+use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning, Statistics};
 
 use arrow::csv;
 use arrow::datatypes::SchemaRef;
@@ -106,7 +105,7 @@ impl ExecutionPlan for CsvExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         let batch_size = self.base_config.batch_size;
         let file_schema = Arc::clone(&self.base_config.file_schema);
         let file_projection = self.base_config.file_column_projection_indices();
@@ -127,14 +126,16 @@ impl ExecutionPlan for CsvExec {
             )) as BatchIter
         };
 
-        Ok(Box::pin(FileStream::new(
+        FileStream::new(
             Arc::clone(&self.base_config.object_store),
             self.base_config.file_groups[partition].clone(),
             fun,
             Arc::clone(&self.projected_schema),
             self.base_config.limit,
             self.base_config.table_partition_cols.clone(),
-        )))
+        )
+        .produce(consumer)
+        .await
     }
 
     fn fmt_as(

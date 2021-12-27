@@ -34,6 +34,7 @@ use crate::physical_plan::{
     Accumulator, AggregateExpr, DisplayFormatType, Distribution, ExecutionPlan,
     Partitioning, PhysicalExpr,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::scalar::ScalarValue;
 
 use arrow::{array::ArrayRef, compute, compute::cast};
@@ -207,30 +208,32 @@ impl ExecutionPlan for HashAggregateExec {
         self.input.output_partitioning()
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        let input = self.input.execute(partition).await?;
-        let group_expr = self.group_expr.iter().map(|x| x.0.clone()).collect();
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        Ok(())
 
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-
-        if self.group_expr.is_empty() {
-            Ok(Box::pin(HashAggregateStream::new(
-                self.mode,
-                self.schema.clone(),
-                self.aggr_expr.clone(),
-                input,
-                baseline_metrics,
-            )))
-        } else {
-            Ok(Box::pin(GroupedHashAggregateStream::new(
-                self.mode,
-                self.schema.clone(),
-                group_expr,
-                self.aggr_expr.clone(),
-                input,
-                baseline_metrics,
-            )))
-        }
+        // let input = self.input.execute(partition).await?;
+        // let group_expr = self.group_expr.iter().map(|x| x.0.clone()).collect();
+        //
+        // let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        //
+        // if self.group_expr.is_empty() {
+        //     Ok(Box::pin(HashAggregateStream::new(
+        //         self.mode,
+        //         self.schema.clone(),
+        //         self.aggr_expr.clone(),
+        //         input,
+        //         baseline_metrics,
+        //     )))
+        // } else {
+        //     Ok(Box::pin(GroupedHashAggregateStream::new(
+        //         self.mode,
+        //         self.schema.clone(),
+        //         group_expr,
+        //         self.aggr_expr.clone(),
+        //         input,
+        //         baseline_metrics,
+        //     )))
+        // }
     }
 
     fn with_new_children(

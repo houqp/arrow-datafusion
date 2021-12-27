@@ -29,6 +29,7 @@ use crate::physical_plan::{
     metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet},
     DisplayFormatType, ExecutionPlan, Partitioning, PhysicalExpr,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use arrow::array::BooleanArray;
 use arrow::compute::filter_record_batch;
 use arrow::datatypes::{DataType, SchemaRef};
@@ -118,15 +119,13 @@ impl ExecutionPlan for FilterExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-
-        Ok(Box::pin(FilterExecStream {
-            schema: self.input.schema().clone(),
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        let mut filter = Filter {
             predicate: self.predicate.clone(),
-            input: self.input.execute(partition).await?,
-            baseline_metrics,
-        }))
+            baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
+            consumer,
+        };
+        self.input.execute(partition, &mut filter).await
     }
 
     fn fmt_as(
@@ -151,17 +150,25 @@ impl ExecutionPlan for FilterExec {
     }
 }
 
-/// The FilterExec streams wraps the input iterator and applies the predicate expression to
-/// determine which rows to include in its output batches
-struct FilterExecStream {
-    /// Output schema, which is the same as the input schema for this operator
-    schema: SchemaRef,
+struct Filter<'a> {
+    consumer: &'a mut dyn Consumer,
     /// The expression to filter on. This expression must evaluate to a boolean value.
     predicate: Arc<dyn PhysicalExpr>,
-    /// The input partition to filter.
-    input: SendableRecordBatchStream,
     /// runtime metrics recording
     baseline_metrics: BaselineMetrics,
+}
+
+impl<'a> Consumer for Filter<'a> {
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+        let timer = self.baseline_metrics.elapsed_compute().timer();
+        let filtered_batch = batch_filter(&batch, &self.predicate)?;
+        timer.done();
+        self.consumer.consume(filtered_batch)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        self.consumer.finish()
+    }
 }
 
 fn batch_filter(
@@ -185,37 +192,6 @@ fn batch_filter(
                 // apply filter array to record batch
                 .and_then(|filter_array| filter_record_batch(batch, filter_array))
         })
-}
-
-impl Stream for FilterExecStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let poll = self.input.poll_next_unpin(cx).map(|x| match x {
-            Some(Ok(batch)) => {
-                let timer = self.baseline_metrics.elapsed_compute().timer();
-                let filtered_batch = batch_filter(&batch, &self.predicate);
-                timer.done();
-                Some(filtered_batch)
-            }
-            other => other,
-        });
-        self.baseline_metrics.record_poll(poll)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        // same number of record batches
-        self.input.size_hint()
-    }
-}
-
-impl RecordBatchStream for FilterExecStream {
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
 }
 
 #[cfg(test)]

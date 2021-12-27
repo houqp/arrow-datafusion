@@ -30,6 +30,7 @@ use crate::error::{DataFusionError, Result};
 use crate::physical_plan::{
     ColumnStatistics, DisplayFormatType, ExecutionPlan, Partitioning, PhysicalExpr,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use arrow::datatypes::{Field, Schema, SchemaRef};
 use arrow::error::Result as ArrowResult;
 use arrow::record_batch::RecordBatch;
@@ -136,13 +137,14 @@ impl ExecutionPlan for ProjectionExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(ProjectionStream {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        let mut projector = Projector {
             schema: self.schema.clone(),
             expr: self.expr.iter().map(|x| x.0.clone()).collect(),
-            input: self.input.execute(partition).await?,
             baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
-        }))
+            consumer,
+        };
+        self.input.execute(partition, &mut projector).await
     }
 
     fn fmt_as(
@@ -227,55 +229,33 @@ fn stats_projection(
     }
 }
 
-impl ProjectionStream {
-    fn batch_project(&self, batch: &RecordBatch) -> ArrowResult<RecordBatch> {
-        // records time on drop
+struct Projector<'a> {
+    consumer: &'a mut dyn Consumer,
+    expr: Vec<Arc<dyn PhysicalExpr>>,
+    schema: SchemaRef,
+    /// runtime metrics recording
+    baseline_metrics: BaselineMetrics,
+}
+
+impl<'a> Consumer for Projector<'a> {
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let _timer = self.baseline_metrics.elapsed_compute().timer();
-        self.expr
+        let projected_batch = self
+            .expr
             .iter()
-            .map(|expr| expr.evaluate(batch))
+            .map(|expr| expr.evaluate(&batch))
             .map(|r| r.map(|v| v.into_array(batch.num_rows())))
             .collect::<Result<Vec<_>>>()
             .map_or_else(
                 |e| Err(DataFusionError::into_arrow_external_error(e)),
                 |arrays| RecordBatch::try_new(self.schema.clone(), arrays),
-            )
-    }
-}
+            )?;
 
-/// Projection iterator
-struct ProjectionStream {
-    schema: SchemaRef,
-    expr: Vec<Arc<dyn PhysicalExpr>>,
-    input: SendableRecordBatchStream,
-    baseline_metrics: BaselineMetrics,
-}
-
-impl Stream for ProjectionStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let poll = self.input.poll_next_unpin(cx).map(|x| match x {
-            Some(Ok(batch)) => Some(self.batch_project(&batch)),
-            other => other,
-        });
-
-        self.baseline_metrics.record_poll(poll)
+        self.consumer.consume(projected_batch)
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        // same number of record batches
-        self.input.size_hint()
-    }
-}
-
-impl RecordBatchStream for ProjectionStream {
-    /// Get the schema
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
+    fn finish(&mut self) -> Result<()> {
+        self.consumer.finish()
     }
 }
 

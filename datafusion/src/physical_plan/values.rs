@@ -20,9 +20,10 @@
 use super::{common, SendableRecordBatchStream, Statistics};
 use crate::error::{DataFusionError, Result};
 use crate::physical_plan::{
-    memory::MemoryStream, ColumnarValue, DisplayFormatType, Distribution, ExecutionPlan,
-    Partitioning, PhysicalExpr,
+    ColumnarValue, DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
+    PhysicalExpr,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::scalar::ScalarValue;
 use arrow::array::new_null_array;
 use arrow::datatypes::SchemaRef;
@@ -87,11 +88,6 @@ impl ValuesExec {
         let data: Vec<RecordBatch> = vec![batch];
         Ok(Self { schema, data })
     }
-
-    /// provides the data
-    fn data(&self) -> Vec<RecordBatch> {
-        self.data.clone()
-    }
 }
 
 #[async_trait]
@@ -133,7 +129,7 @@ impl ExecutionPlan for ValuesExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         // GlobalLimitExec has a single output partition
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
@@ -142,11 +138,12 @@ impl ExecutionPlan for ValuesExec {
             )));
         }
 
-        Ok(Box::pin(MemoryStream::try_new(
-            self.data(),
-            self.schema.clone(),
-            None,
-        )?))
+        for batch in &self.data {
+            if consumer.consume(batch.clone())? == ConsumeStatus::Terminate {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn fmt_as(
@@ -162,8 +159,11 @@ impl ExecutionPlan for ValuesExec {
     }
 
     fn statistics(&self) -> Statistics {
-        let batch = self.data();
-        common::compute_record_batch_statistics(&[batch], &self.schema, None)
+        common::compute_record_batch_statistics(
+            [self.data.as_slice()],
+            &self.schema,
+            None,
+        )
     }
 }
 

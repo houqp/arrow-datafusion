@@ -704,36 +704,37 @@ impl ExecutionContext {
         plan: Arc<dyn ExecutionPlan>,
         path: impl AsRef<str>,
     ) -> Result<()> {
-        let path = path.as_ref();
-        // create directory to contain the CSV files (one per partition)
-        let fs_path = Path::new(path);
-        match fs::create_dir(fs_path) {
-            Ok(()) => {
-                let mut tasks = vec![];
-                for i in 0..plan.output_partitioning().partition_count() {
-                    let plan = plan.clone();
-                    let filename = format!("part-{}.csv", i);
-                    let path = fs_path.join(&filename);
-                    let file = fs::File::create(path)?;
-                    let mut writer = csv::Writer::new(file);
-                    let stream = plan.execute(i).await?;
-                    let handle: JoinHandle<Result<()>> = task::spawn(async move {
-                        stream
-                            .map(|batch| writer.write(&batch?))
-                            .try_collect()
-                            .await
-                            .map_err(DataFusionError::from)
-                    });
-                    tasks.push(handle);
-                }
-                futures::future::join_all(tasks).await;
-                Ok(())
-            }
-            Err(e) => Err(DataFusionError::Execution(format!(
-                "Could not create directory {}: {:?}",
-                path, e
-            ))),
-        }
+        Ok(())
+        // let path = path.as_ref();
+        // // create directory to contain the CSV files (one per partition)
+        // let fs_path = Path::new(path);
+        // match fs::create_dir(fs_path) {
+        //     Ok(()) => {
+        //         let mut tasks = vec![];
+        //         for i in 0..plan.output_partitioning().partition_count() {
+        //             let plan = plan.clone();
+        //             let filename = format!("part-{}.csv", i);
+        //             let path = fs_path.join(&filename);
+        //             let file = fs::File::create(path)?;
+        //             let mut writer = csv::Writer::new(file);
+        //             let stream = plan.execute(i).await?;
+        //             let handle: JoinHandle<Result<()>> = task::spawn(async move {
+        //                 stream
+        //                     .map(|batch| writer.write(&batch?))
+        //                     .try_collect()
+        //                     .await
+        //                     .map_err(DataFusionError::from)
+        //             });
+        //             tasks.push(handle);
+        //         }
+        //         futures::future::join_all(tasks).await;
+        //         Ok(())
+        //     }
+        //     Err(e) => Err(DataFusionError::Execution(format!(
+        //         "Could not create directory {}: {:?}",
+        //         path, e
+        //     ))),
+        // }
     }
 
     /// Executes a query and writes the results to a partitioned Parquet file.
@@ -743,41 +744,42 @@ impl ExecutionContext {
         path: impl AsRef<str>,
         writer_properties: Option<WriterProperties>,
     ) -> Result<()> {
-        let path = path.as_ref();
-        // create directory to contain the Parquet files (one per partition)
-        let fs_path = Path::new(path);
-        match fs::create_dir(fs_path) {
-            Ok(()) => {
-                let mut tasks = vec![];
-                for i in 0..plan.output_partitioning().partition_count() {
-                    let plan = plan.clone();
-                    let filename = format!("part-{}.parquet", i);
-                    let path = fs_path.join(&filename);
-                    let file = fs::File::create(path)?;
-                    let mut writer = ArrowWriter::try_new(
-                        file.try_clone().unwrap(),
-                        plan.schema(),
-                        writer_properties.clone(),
-                    )?;
-                    let stream = plan.execute(i).await?;
-                    let handle: JoinHandle<Result<()>> = task::spawn(async move {
-                        stream
-                            .map(|batch| writer.write(&batch?))
-                            .try_collect()
-                            .await
-                            .map_err(DataFusionError::from)?;
-                        writer.close().map_err(DataFusionError::from).map(|_| ())
-                    });
-                    tasks.push(handle);
-                }
-                futures::future::join_all(tasks).await;
-                Ok(())
-            }
-            Err(e) => Err(DataFusionError::Execution(format!(
-                "Could not create directory {}: {:?}",
-                path, e
-            ))),
-        }
+        Ok(())
+        // let path = path.as_ref();
+        // // create directory to contain the Parquet files (one per partition)
+        // let fs_path = Path::new(path);
+        // match fs::create_dir(fs_path) {
+        //     Ok(()) => {
+        //         let mut tasks = vec![];
+        //         for i in 0..plan.output_partitioning().partition_count() {
+        //             let plan = plan.clone();
+        //             let filename = format!("part-{}.parquet", i);
+        //             let path = fs_path.join(&filename);
+        //             let file = fs::File::create(path)?;
+        //             let mut writer = ArrowWriter::try_new(
+        //                 file.try_clone().unwrap(),
+        //                 plan.schema(),
+        //                 writer_properties.clone(),
+        //             )?;
+        //             let stream = plan.execute(i).await?;
+        //             let handle: JoinHandle<Result<()>> = task::spawn(async move {
+        //                 stream
+        //                     .map(|batch| writer.write(&batch?))
+        //                     .try_collect()
+        //                     .await
+        //                     .map_err(DataFusionError::from)?;
+        //                 writer.close().map_err(DataFusionError::from).map(|_| ())
+        //             });
+        //             tasks.push(handle);
+        //         }
+        //         futures::future::join_all(tasks).await;
+        //         Ok(())
+        //     }
+        //     Err(e) => Err(DataFusionError::Execution(format!(
+        //         "Could not create directory {}: {:?}",
+        //         path, e
+        //     ))),
+        // }
     }
 
     /// Optimizes the logical plan by applying optimizer rules, and

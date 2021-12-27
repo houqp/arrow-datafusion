@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::error::{DataFusionError, Result};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::physical_plan::{
     DisplayFormatType, ExecutionPlan, Partitioning, RecordBatchStream,
     SendableRecordBatchStream,
@@ -111,16 +112,15 @@ impl ExecutionPlan for CoalesceBatchesExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(CoalesceBatchesStream {
-            input: self.input.execute(partition).await?,
-            schema: self.input.schema(),
-            target_batch_size: self.target_batch_size,
-            buffer: Vec::new(),
-            buffered_rows: 0,
-            is_closed: false,
-            baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
-        }))
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        let mut coalescer = BatchCoalescer::new(
+            partition,
+            self.input.schema(),
+            self.target_batch_size,
+            &self.metrics,
+            consumer,
+        );
+        self.input.execute(partition, &mut coalescer).await
     }
 
     fn fmt_as(
@@ -148,9 +148,7 @@ impl ExecutionPlan for CoalesceBatchesExec {
     }
 }
 
-struct CoalesceBatchesStream {
-    /// The input plan
-    input: SendableRecordBatchStream,
+struct BatchCoalescer<'a> {
     /// The input schema
     schema: SchemaRef,
     /// Minimum number of rows for coalesces batches
@@ -159,104 +157,77 @@ struct CoalesceBatchesStream {
     buffer: Vec<RecordBatch>,
     /// Buffered row count
     buffered_rows: usize,
-    /// Whether the stream has finished returning all of its data or not
-    is_closed: bool,
-    /// Execution metrics
-    baseline_metrics: BaselineMetrics,
+    consumer: &'a mut dyn Consumer,
 }
 
-impl Stream for CoalesceBatchesStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let poll = self.poll_next_inner(cx);
-        self.baseline_metrics.record_poll(poll)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        // we can't predict the size of incoming batches so re-use the size hint from the input
-        self.input.size_hint()
-    }
-}
-
-impl CoalesceBatchesStream {
-    fn poll_next_inner(
-        self: &mut Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<ArrowResult<RecordBatch>>> {
-        // Get a clone (uses same underlying atomic) as self gets borrowed below
-        let cloned_time = self.baseline_metrics.elapsed_compute().clone();
-        // records time on drop
-        let _timer = cloned_time.timer();
-
-        if self.is_closed {
-            return Poll::Ready(None);
+impl<'a> BatchCoalescer<'a> {
+    fn new(
+        partition: usize,
+        schema: SchemaRef,
+        target_batch_size: usize,
+        metrics: &ExecutionPlanMetricsSet,
+        consumer: &'a mut dyn Consumer,
+    ) -> Self {
+        Self {
+            schema,
+            target_batch_size,
+            buffer: Vec::new(),
+            buffered_rows: 0,
+            // baseline_metrics: BaselineMetrics::new(&metrics, partition),
+            consumer,
         }
-        loop {
-            let input_batch = self.input.poll_next_unpin(cx);
-            match input_batch {
-                Poll::Ready(x) => match x {
-                    Some(Ok(ref batch)) => {
-                        if batch.num_rows() >= self.target_batch_size
-                            && self.buffer.is_empty()
-                        {
-                            return Poll::Ready(Some(Ok(batch.clone())));
-                        } else if batch.num_rows() == 0 {
-                            // discard empty batches
-                        } else {
-                            // add to the buffered batches
-                            self.buffer.push(batch.clone());
-                            self.buffered_rows += batch.num_rows();
-                            // check to see if we have enough batches yet
-                            if self.buffered_rows >= self.target_batch_size {
-                                // combine the batches and return
-                                let batch = concat_batches(
-                                    &self.schema,
-                                    &self.buffer,
-                                    self.buffered_rows,
-                                )?;
-                                // reset buffer state
-                                self.buffer.clear();
-                                self.buffered_rows = 0;
-                                // return batch
-                                return Poll::Ready(Some(Ok(batch)));
-                            }
-                        }
-                    }
-                    None => {
-                        self.is_closed = true;
-                        // we have reached the end of the input stream but there could still
-                        // be buffered batches
-                        if self.buffer.is_empty() {
-                            return Poll::Ready(None);
-                        } else {
-                            // combine the batches and return
-                            let batch = concat_batches(
-                                &self.schema,
-                                &self.buffer,
-                                self.buffered_rows,
-                            )?;
-                            // reset buffer state
-                            self.buffer.clear();
-                            self.buffered_rows = 0;
-                            // return batch
-                            return Poll::Ready(Some(Ok(batch)));
-                        }
-                    }
-                    other => return Poll::Ready(other),
-                },
-                Poll::Pending => return Poll::Pending,
+    }
+}
+
+impl<'a> Consumer for BatchCoalescer<'a> {
+    // FIXME: add back timer
+    // // Get a clone (uses same underlying atomic) as self gets borrowed below
+    // let cloned_time = self.baseline_metrics.elapsed_compute().clone();
+    // // records time on drop
+    // let _timer = cloned_time.timer();
+
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+        if batch.num_rows() >= self.target_batch_size && self.buffer.is_empty() {
+            self.consumer.consume(batch)
+        } else if batch.num_rows() == 0 {
+            // discard empty batches
+            Ok(ConsumeStatus::Continue)
+        } else {
+            // add to the buffered batches
+            self.buffered_rows += batch.num_rows();
+            self.buffer.push(batch);
+            // check to see if we have enough batches yet
+            if self.buffered_rows >= self.target_batch_size {
+                // combine the batches and return
+                let batch =
+                    concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
+                // reset buffer state
+                self.buffer.clear();
+                self.buffered_rows = 0;
+                // push batch downstream
+                self.consumer.consume(batch)
+            } else {
+                Ok(ConsumeStatus::Continue)
             }
         }
     }
-}
 
-impl RecordBatchStream for CoalesceBatchesStream {
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
+    fn finish(&mut self) -> Result<()> {
+        // we have reached the end of the input stream but there could still
+        // be buffered batches
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+
+        // combine the batches and return
+        let batch = concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
+        // reset buffer state
+        self.buffer.clear();
+        self.buffered_rows = 0;
+
+        // push batch downstream
+        self.consumer.consume(batch)?;
+        self.consumer.finish()
     }
 }
 

@@ -20,13 +20,11 @@
 use std::any::Any;
 use std::sync::Arc;
 
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::{
     error::{DataFusionError, Result},
     logical_plan::StringifiedPlan,
-    physical_plan::{
-        common::SizedRecordBatchStream, DisplayFormatType, ExecutionPlan, Partitioning,
-        Statistics,
-    },
+    physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning, Statistics},
 };
 use arrow::{array::StringBuilder, datatypes::SchemaRef, record_batch::RecordBatch};
 
@@ -101,7 +99,7 @@ impl ExecutionPlan for ExplainExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
                 "ExplainExec invalid partition {}",
@@ -141,10 +139,8 @@ impl ExecutionPlan for ExplainExec {
             ],
         )?;
 
-        Ok(Box::pin(SizedRecordBatchStream::new(
-            self.schema.clone(),
-            vec![Arc::new(record_batch)],
-        )))
+        consumer.consume(record_batch)?;
+        consumer.finish()
     }
 
     fn fmt_as(

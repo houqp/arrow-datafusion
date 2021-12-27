@@ -22,6 +22,7 @@ use crate::physical_plan::common::AbortOnDropSingle;
 use crate::physical_plan::metrics::{
     BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet,
 };
+use crate::physical_plan::Consumer;
 use crate::physical_plan::{
     common, ColumnStatistics, DisplayFormatType, Distribution, ExecutionPlan,
     Partitioning, RecordBatchStream, SendableRecordBatchStream, Statistics, WindowExpr,
@@ -141,16 +142,19 @@ impl ExecutionPlan for WindowAggExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        let input = self.input.execute(partition).await?;
-        let stream = Box::pin(WindowAggStream::new(
-            self.schema.clone(),
-            self.window_expr.clone(),
-            input,
-            BaselineMetrics::new(&self.metrics, partition),
-        ));
-        Ok(stream)
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        Ok(())
     }
+    // async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    //     let input = self.input.execute(partition).await?;
+    //     let stream = Box::pin(WindowAggStream::new(
+    //         self.schema.clone(),
+    //         self.window_expr.clone(),
+    //         input,
+    //         BaselineMetrics::new(&self.metrics, partition),
+    //     ));
+    //     Ok(stream)
+    // }
 
     fn fmt_as(
         &self,
@@ -219,121 +223,121 @@ fn compute_window_aggregates(
         .collect()
 }
 
-pin_project! {
-    /// stream for window aggregation plan
-    pub struct WindowAggStream {
-        schema: SchemaRef,
-        drop_helper: AbortOnDropSingle<()>,
-        #[pin]
-        output: futures::channel::oneshot::Receiver<ArrowResult<RecordBatch>>,
-        finished: bool,
-        baseline_metrics: BaselineMetrics,
-    }
-}
-
-impl WindowAggStream {
-    /// Create a new WindowAggStream
-    pub fn new(
-        schema: SchemaRef,
-        window_expr: Vec<Arc<dyn WindowExpr>>,
-        input: SendableRecordBatchStream,
-        baseline_metrics: BaselineMetrics,
-    ) -> Self {
-        let (tx, rx) = futures::channel::oneshot::channel();
-        let schema_clone = schema.clone();
-        let elapsed_compute = baseline_metrics.elapsed_compute().clone();
-        let join_handle = tokio::spawn(async move {
-            let schema = schema_clone.clone();
-            let result =
-                WindowAggStream::process(input, window_expr, schema, elapsed_compute)
-                    .await;
-
-            // failing here is OK, the receiver is gone and does not care about the result
-            tx.send(result).ok();
-        });
-
-        Self {
-            schema,
-            drop_helper: AbortOnDropSingle::new(join_handle),
-            output: rx,
-            finished: false,
-            baseline_metrics,
-        }
-    }
-
-    async fn process(
-        input: SendableRecordBatchStream,
-        window_expr: Vec<Arc<dyn WindowExpr>>,
-        schema: SchemaRef,
-        elapsed_compute: crate::physical_plan::metrics::Time,
-    ) -> ArrowResult<RecordBatch> {
-        let input_schema = input.schema();
-        let batches = common::collect(input)
-            .await
-            .map_err(DataFusionError::into_arrow_external_error)?;
-
-        // record compute time on drop
-        let _timer = elapsed_compute.timer();
-
-        let batch = common::combine_batches(&batches, input_schema.clone())?;
-        if let Some(batch) = batch {
-            // calculate window cols
-            let mut columns = compute_window_aggregates(window_expr, &batch)
-                .map_err(DataFusionError::into_arrow_external_error)?;
-            // combine with the original cols
-            // note the setup of window aggregates is that they newly calculated window
-            // expressions are always prepended to the columns
-            columns.extend_from_slice(batch.columns());
-            RecordBatch::try_new(schema, columns)
-        } else {
-            Ok(RecordBatch::new_empty(schema))
-        }
-    }
-}
-
-impl Stream for WindowAggStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let poll = self.poll_next_inner(cx);
-        self.baseline_metrics.record_poll(poll)
-    }
-}
-
-impl WindowAggStream {
-    #[inline]
-    fn poll_next_inner(
-        self: &mut Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<ArrowResult<RecordBatch>>> {
-        if self.finished {
-            return Poll::Ready(None);
-        }
-
-        // is the output ready?
-        let output_poll = self.output.poll_unpin(cx);
-
-        match output_poll {
-            Poll::Ready(result) => {
-                self.finished = true;
-                // check for error in receiving channel and unwrap actual result
-                let result = match result {
-                    Err(e) => Some(Err(ArrowError::ExternalError(Box::new(e)))), // error receiving
-                    Ok(result) => Some(result),
-                };
-                Poll::Ready(result)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl RecordBatchStream for WindowAggStream {
-    /// Get the schema
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-}
+// pin_project! {
+//     /// stream for window aggregation plan
+//     pub struct WindowAggStream {
+//         schema: SchemaRef,
+//         drop_helper: AbortOnDropSingle<()>,
+//         #[pin]
+//         output: futures::channel::oneshot::Receiver<ArrowResult<RecordBatch>>,
+//         finished: bool,
+//         baseline_metrics: BaselineMetrics,
+//     }
+// }
+//
+// impl WindowAggStream {
+//     /// Create a new WindowAggStream
+//     pub fn new(
+//         schema: SchemaRef,
+//         window_expr: Vec<Arc<dyn WindowExpr>>,
+//         input: SendableRecordBatchStream,
+//         baseline_metrics: BaselineMetrics,
+//     ) -> Self {
+//         let (tx, rx) = futures::channel::oneshot::channel();
+//         let schema_clone = schema.clone();
+//         let elapsed_compute = baseline_metrics.elapsed_compute().clone();
+//         let join_handle = tokio::spawn(async move {
+//             let schema = schema_clone.clone();
+//             let result =
+//                 WindowAggStream::process(input, window_expr, schema, elapsed_compute)
+//                     .await;
+//
+//             // failing here is OK, the receiver is gone and does not care about the result
+//             tx.send(result).ok();
+//         });
+//
+//         Self {
+//             schema,
+//             drop_helper: AbortOnDropSingle::new(join_handle),
+//             output: rx,
+//             finished: false,
+//             baseline_metrics,
+//         }
+//     }
+//
+//     async fn process(
+//         input: SendableRecordBatchStream,
+//         window_expr: Vec<Arc<dyn WindowExpr>>,
+//         schema: SchemaRef,
+//         elapsed_compute: crate::physical_plan::metrics::Time,
+//     ) -> ArrowResult<RecordBatch> {
+//         let input_schema = input.schema();
+//         let batches = common::collect(input)
+//             .await
+//             .map_err(DataFusionError::into_arrow_external_error)?;
+//
+//         // record compute time on drop
+//         let _timer = elapsed_compute.timer();
+//
+//         let batch = common::combine_batches(&batches, input_schema.clone())?;
+//         if let Some(batch) = batch {
+//             // calculate window cols
+//             let mut columns = compute_window_aggregates(window_expr, &batch)
+//                 .map_err(DataFusionError::into_arrow_external_error)?;
+//             // combine with the original cols
+//             // note the setup of window aggregates is that they newly calculated window
+//             // expressions are always prepended to the columns
+//             columns.extend_from_slice(batch.columns());
+//             RecordBatch::try_new(schema, columns)
+//         } else {
+//             Ok(RecordBatch::new_empty(schema))
+//         }
+//     }
+// }
+//
+// impl Stream for WindowAggStream {
+//     type Item = ArrowResult<RecordBatch>;
+//
+//     fn poll_next(
+//         mut self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Option<Self::Item>> {
+//         let poll = self.poll_next_inner(cx);
+//         self.baseline_metrics.record_poll(poll)
+//     }
+// }
+//
+// impl WindowAggStream {
+//     #[inline]
+//     fn poll_next_inner(
+//         self: &mut Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Option<ArrowResult<RecordBatch>>> {
+//         if self.finished {
+//             return Poll::Ready(None);
+//         }
+//
+//         // is the output ready?
+//         let output_poll = self.output.poll_unpin(cx);
+//
+//         match output_poll {
+//             Poll::Ready(result) => {
+//                 self.finished = true;
+//                 // check for error in receiving channel and unwrap actual result
+//                 let result = match result {
+//                     Err(e) => Some(Err(ArrowError::ExternalError(Box::new(e)))), // error receiving
+//                     Ok(result) => Some(result),
+//                 };
+//                 Poll::Ready(result)
+//             }
+//             Poll::Pending => Poll::Pending,
+//         }
+//     }
+// }
+//
+// impl RecordBatchStream for WindowAggStream {
+//     /// Get the schema
+//     fn schema(&self) -> SchemaRef {
+//         self.schema.clone()
+//     }
+// }

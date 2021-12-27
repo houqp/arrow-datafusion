@@ -21,8 +21,10 @@
 //! Note: Most traits here need to be marked `Sync + Send` to be
 //! compliant with the `SendableRecordBatchStream` trait.
 
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::{
     datasource::{object_store::ObjectStore, PartitionedFile},
+    error::Result,
     physical_plan::RecordBatchStream,
     scalar::ScalarValue,
 };
@@ -31,7 +33,7 @@ use arrow::{
     error::{ArrowError, Result as ArrowResult},
     record_batch::RecordBatch,
 };
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use std::{
     io::Read,
     iter,
@@ -134,6 +136,16 @@ impl<F: FormatReaderOpener> FileStream<F> {
                 None => None,
             },
         }
+    }
+
+    pub async fn produce(&mut self, consumer: &mut dyn Consumer) -> Result<()> {
+        while let Some(result) = self.next().await {
+            let batch = result?;
+            if consumer.consume(batch)? == ConsumeStatus::Terminate {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 

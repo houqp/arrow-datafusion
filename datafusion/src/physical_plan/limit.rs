@@ -26,6 +26,7 @@ use futures::stream::Stream;
 use futures::stream::StreamExt;
 
 use crate::error::{DataFusionError, Result};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::physical_plan::{
     DisplayFormatType, Distribution, ExecutionPlan, Partitioning,
 };
@@ -113,7 +114,7 @@ impl ExecutionPlan for GlobalLimitExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         // GlobalLimitExec has a single output partition
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
@@ -129,13 +130,12 @@ impl ExecutionPlan for GlobalLimitExec {
             ));
         }
 
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let stream = self.input.execute(0).await?;
-        Ok(Box::pin(LimitStream::new(
-            stream,
+        let mut limiter = Limiter::new(
             self.limit,
-            baseline_metrics,
-        )))
+            BaselineMetrics::new(&self.metrics, partition),
+            consumer,
+        );
+        self.input.execute(0, &mut limiter).await
     }
 
     fn fmt_as(
@@ -242,14 +242,13 @@ impl ExecutionPlan for LocalLimitExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let stream = self.input.execute(partition).await?;
-        Ok(Box::pin(LimitStream::new(
-            stream,
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        let mut limiter = Limiter::new(
             self.limit,
-            baseline_metrics,
-        )))
+            BaselineMetrics::new(&self.metrics, partition),
+            consumer,
+        );
+        self.input.execute(partition, &mut limiter).await
     }
 
     fn fmt_as(
@@ -302,79 +301,47 @@ pub fn truncate_batch(batch: &RecordBatch, n: usize) -> RecordBatch {
     RecordBatch::try_new(batch.schema(), limited_columns).unwrap()
 }
 
-/// A Limit stream limits the stream to up to `limit` rows.
-struct LimitStream {
-    /// The maximum number of rows to produce
+struct Limiter<'a> {
     limit: usize,
-    /// The input to read from. This is set to None once the limit is
-    /// reached to enable early termination
-    input: Option<SendableRecordBatchStream>,
-    /// Copy of the input schema
-    schema: SchemaRef,
-    // the current number of rows which have been produced
+    consumer: &'a mut dyn Consumer,
     current_len: usize,
-    /// Execution time metrics
     baseline_metrics: BaselineMetrics,
 }
 
-impl LimitStream {
+impl<'a> Limiter<'a> {
     fn new(
-        input: SendableRecordBatchStream,
         limit: usize,
         baseline_metrics: BaselineMetrics,
+        consumer: &'a mut dyn Consumer,
     ) -> Self {
-        let schema = input.schema();
         Self {
             limit,
-            input: Some(input),
-            schema,
+            consumer,
             current_len: 0,
             baseline_metrics,
         }
     }
+}
 
-    fn stream_limit(&mut self, batch: RecordBatch) -> Option<RecordBatch> {
+impl<'a> Consumer for Limiter<'a> {
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         // records time on drop
         let _timer = self.baseline_metrics.elapsed_compute().timer();
         if self.current_len == self.limit {
-            self.input = None; // clear input so it can be dropped early
-            None
+            Ok(ConsumeStatus::Terminate)
         } else if self.current_len + batch.num_rows() <= self.limit {
             self.current_len += batch.num_rows();
-            Some(batch)
+            self.consumer.consume(batch)
         } else {
             let batch_rows = self.limit - self.current_len;
             self.current_len = self.limit;
-            self.input = None; // clear input so it can be dropped early
-            Some(truncate_batch(&batch, batch_rows))
+            self.consumer.consume(truncate_batch(&batch, batch_rows))?;
+            Ok(ConsumeStatus::Terminate)
         }
     }
-}
 
-impl Stream for LimitStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let poll = match &mut self.input {
-            Some(input) => input.poll_next_unpin(cx).map(|x| match x {
-                Some(Ok(batch)) => Ok(self.stream_limit(batch)).transpose(),
-                other => other,
-            }),
-            // input has been cleared
-            None => Poll::Ready(None),
-        };
-
-        self.baseline_metrics.record_poll(poll)
-    }
-}
-
-impl RecordBatchStream for LimitStream {
-    /// Get the schema
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
+    fn finish(&mut self) -> Result<()> {
+        self.consumer.finish()
     }
 }
 

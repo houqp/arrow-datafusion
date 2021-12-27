@@ -20,6 +20,7 @@
 use std::sync::Arc;
 use std::{any::Any, time::Instant};
 
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::{
     error::{DataFusionError, Result},
     physical_plan::{
@@ -99,106 +100,108 @@ impl ExecutionPlan for AnalyzeExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        if 0 != partition {
-            return Err(DataFusionError::Internal(format!(
-                "AnalyzeExec invalid partition. Expected 0, got {}",
-                partition
-            )));
-        }
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        Ok(())
+        // if 0 != partition {
+        //     return Err(DataFusionError::Internal(format!(
+        //         "AnalyzeExec invalid partition. Expected 0, got {}",
+        //         partition
+        //     )));
+        // }
+        //
+        // // should be ensured by `SinglePartition`  above
+        // let input_partitions = self.input.output_partitioning().partition_count();
+        // if input_partitions != 1 {
+        //     return Err(DataFusionError::Internal(format!(
+        //         "AnalyzeExec invalid number of input partitions. Expected 1, got {}",
+        //         input_partitions
+        //     )));
+        // }
+        //
 
-        // should be ensured by `SinglePartition`  above
-        let input_partitions = self.input.output_partitioning().partition_count();
-        if input_partitions != 1 {
-            return Err(DataFusionError::Internal(format!(
-                "AnalyzeExec invalid number of input partitions. Expected 1, got {}",
-                input_partitions
-            )));
-        }
-
-        let (tx, rx) = tokio::sync::mpsc::channel(input_partitions);
-
-        let captured_input = self.input.clone();
-        let mut input_stream = captured_input.execute(0).await?;
-        let captured_schema = self.schema.clone();
-        let verbose = self.verbose;
-
-        // Task reads batches the input and when complete produce a
-        // RecordBatch with a report that is written to `tx` when done
-        let join_handle = tokio::task::spawn(async move {
-            let start = Instant::now();
-            let mut total_rows = 0;
-
-            // Note the code below ignores errors sending on tx. An
-            // error sending means the plan is being torn down and
-            // nothing is left that will handle the error (aka no one
-            // will hear us scream)
-            while let Some(b) = input_stream.next().await {
-                match b {
-                    Ok(batch) => {
-                        total_rows += batch.num_rows();
-                    }
-                    b @ Err(_) => {
-                        // try and pass on errors from input
-                        if tx.send(b).await.is_err() {
-                            // receiver hung up, stop executing (no
-                            // one will look at any further results we
-                            // send)
-                            return;
-                        }
-                    }
-                }
-            }
-            let end = Instant::now();
-
-            let mut type_builder = StringBuilder::new(1);
-            let mut plan_builder = StringBuilder::new(1);
-
-            // TODO use some sort of enum rather than strings?
-            type_builder.append_value("Plan with Metrics").unwrap();
-
-            let annotated_plan =
-                DisplayableExecutionPlan::with_metrics(captured_input.as_ref())
-                    .indent()
-                    .to_string();
-            plan_builder.append_value(annotated_plan).unwrap();
-
-            // Verbose output
-            // TODO make this more sophisticated
-            if verbose {
-                type_builder.append_value("Plan with Full Metrics").unwrap();
-
-                let annotated_plan =
-                    DisplayableExecutionPlan::with_full_metrics(captured_input.as_ref())
-                        .indent()
-                        .to_string();
-                plan_builder.append_value(annotated_plan).unwrap();
-
-                type_builder.append_value("Output Rows").unwrap();
-                plan_builder.append_value(total_rows.to_string()).unwrap();
-
-                type_builder.append_value("Duration").unwrap();
-                plan_builder
-                    .append_value(format!("{:?}", end - start))
-                    .unwrap();
-            }
-
-            let maybe_batch = RecordBatch::try_new(
-                captured_schema,
-                vec![
-                    Arc::new(type_builder.finish()),
-                    Arc::new(plan_builder.finish()),
-                ],
-            );
-            // again ignore error
-            tx.send(maybe_batch).await.ok();
-        });
-
-        Ok(RecordBatchReceiverStream::create(
-            &self.schema,
-            rx,
-            join_handle,
-        ))
+        // let (tx, rx) = tokio::sync::mpsc::channel(input_partitions);
+        //
+        // let captured_input = self.input.clone();
+        // let mut input_stream = captured_input.execute(0).await?;
+        // let captured_schema = self.schema.clone();
+        // let verbose = self.verbose;
+        //
+        // // Task reads batches the input and when complete produce a
+        // // RecordBatch with a report that is written to `tx` when done
+        // let join_handle = tokio::task::spawn(async move {
+        //     let start = Instant::now();
+        //     let mut total_rows = 0;
+        //
+        //     // Note the code below ignores errors sending on tx. An
+        //     // error sending means the plan is being torn down and
+        //     // nothing is left that will handle the error (aka no one
+        //     // will hear us scream)
+        //     while let Some(b) = input_stream.next().await {
+        //         match b {
+        //             Ok(batch) => {
+        //                 total_rows += batch.num_rows();
+        //             }
+        //             b @ Err(_) => {
+        //                 // try and pass on errors from input
+        //                 if tx.send(b).await.is_err() {
+        //                     // receiver hung up, stop executing (no
+        //                     // one will look at any further results we
+        //                     // send)
+        //                     return;
+        //                 }
+        //             }
+        //         }
+        //     }
+        //     let end = Instant::now();
+        //
+        //     let mut type_builder = StringBuilder::new(1);
+        //     let mut plan_builder = StringBuilder::new(1);
+        //
+        //     // TODO use some sort of enum rather than strings?
+        //     type_builder.append_value("Plan with Metrics").unwrap();
+        //
+        //     let annotated_plan =
+        //         DisplayableExecutionPlan::with_metrics(captured_input.as_ref())
+        //             .indent()
+        //             .to_string();
+        //     plan_builder.append_value(annotated_plan).unwrap();
+        //
+        //     // Verbose output
+        //     // TODO make this more sophisticated
+        //     if verbose {
+        //         type_builder.append_value("Plan with Full Metrics").unwrap();
+        //
+        //         let annotated_plan =
+        //             DisplayableExecutionPlan::with_full_metrics(captured_input.as_ref())
+        //                 .indent()
+        //                 .to_string();
+        //         plan_builder.append_value(annotated_plan).unwrap();
+        //
+        //         type_builder.append_value("Output Rows").unwrap();
+        //         plan_builder.append_value(total_rows.to_string()).unwrap();
+        //
+        //         type_builder.append_value("Duration").unwrap();
+        //         plan_builder
+        //             .append_value(format!("{:?}", end - start))
+        //             .unwrap();
+        //     }
+        //
+        //     let maybe_batch = RecordBatch::try_new(
+        //         captured_schema,
+        //         vec![
+        //             Arc::new(type_builder.finish()),
+        //             Arc::new(plan_builder.finish()),
+        //         ],
+        //     );
+        //     // again ignore error
+        //     tx.send(maybe_batch).await.ok();
+        // });
+        //
+        // Ok(RecordBatchReceiverStream::create(
+        //     &self.schema,
+        //     rx,
+        //     join_handle,
+        // ))
     }
 
     fn fmt_as(

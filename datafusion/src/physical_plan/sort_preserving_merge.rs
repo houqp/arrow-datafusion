@@ -42,10 +42,10 @@ use hashbrown::HashMap;
 
 use crate::error::{DataFusionError, Result};
 use crate::physical_plan::{
-    common::spawn_execution, expressions::PhysicalSortExpr, DisplayFormatType,
-    Distribution, ExecutionPlan, Partitioning, PhysicalExpr, RecordBatchStream,
-    SendableRecordBatchStream, Statistics,
+    expressions::PhysicalSortExpr, DisplayFormatType, Distribution, ExecutionPlan,
+    Partitioning, PhysicalExpr, RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 
 /// Sort preserving merge execution plan
 ///
@@ -131,47 +131,75 @@ impl ExecutionPlan for SortPreservingMergeExec {
         }
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        if 0 != partition {
-            return Err(DataFusionError::Internal(format!(
-                "SortPreservingMergeExec invalid partition {}",
-                partition
-            )));
-        }
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        Ok(())
 
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        // /// Spawns a task to the tokio threadpool and writes its outputs to the provided mpsc sender
+        // pub(crate) fn spawn_execution(
+        //     input: Arc<dyn ExecutionPlan>,
+        //     mut output: mpsc::Sender<ArrowResult<RecordBatch>>,
+        //     partition: usize,
+        // ) -> JoinHandle<()> {
+        //     tokio::spawn(async move {
+        //         let mut stream = match input.execute(partition).await {
+        //             Err(e) => {
+        //                 // If send fails, plan being torn
+        //                 // down, no place to send the error
+        //                 let arrow_error = ArrowError::ExternalError(Box::new(e));
+        //                 output.send(Err(arrow_error)).await.ok();
+        //                 return;
+        //             }
+        //             Ok(stream) => stream,
+        //         };
+        //
+        //         while let Some(item) = stream.next().await {
+        //             // If send fails, plan being torn down,
+        //             // there is no place to send the error
+        //             output.send(item).await.ok();
+        //         }
+        //     })
+        // }
 
-        let input_partitions = self.input.output_partitioning().partition_count();
-        match input_partitions {
-            0 => Err(DataFusionError::Internal(
-                "SortPreservingMergeExec requires at least one input partition"
-                    .to_owned(),
-            )),
-            1 => {
-                // bypass if there is only one partition to merge (no metrics in this case either)
-                self.input.execute(0).await
-            }
-            _ => {
-                let (receivers, join_handles) = (0..input_partitions)
-                    .into_iter()
-                    .map(|part_i| {
-                        let (sender, receiver) = mpsc::channel(1);
-                        let join_handle =
-                            spawn_execution(self.input.clone(), sender, part_i);
-                        (receiver, join_handle)
-                    })
-                    .unzip();
-
-                Ok(Box::pin(SortPreservingMergeStream::new(
-                    receivers,
-                    AbortOnDropMany(join_handles),
-                    self.schema(),
-                    &self.expr,
-                    self.target_batch_size,
-                    baseline_metrics,
-                )))
-            }
-        }
+        // if 0 != partition {
+        //     return Err(DataFusionError::Internal(format!(
+        //         "SortPreservingMergeExec invalid partition {}",
+        //         partition
+        //     )));
+        // }
+        //
+        // let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        //
+        // let input_partitions = self.input.output_partitioning().partition_count();
+        // match input_partitions {
+        //     0 => Err(DataFusionError::Internal(
+        //         "SortPreservingMergeExec requires at least one input partition"
+        //             .to_owned(),
+        //     )),
+        //     1 => {
+        //         // bypass if there is only one partition to merge (no metrics in this case either)
+        //         self.input.execute(0).await
+        //     }
+        //     _ => {
+        //         let (receivers, join_handles) = (0..input_partitions)
+        //             .into_iter()
+        //             .map(|part_i| {
+        //                 let (sender, receiver) = mpsc::channel(1);
+        //                 let join_handle =
+        //                     spawn_execution(self.input.clone(), sender, part_i);
+        //                 (receiver, join_handle)
+        //             })
+        //             .unzip();
+        //
+        //         Ok(Box::pin(SortPreservingMergeStream::new(
+        //             receivers,
+        //             AbortOnDropMany(join_handles),
+        //             self.schema(),
+        //             &self.expr,
+        //             self.target_batch_size,
+        //             baseline_metrics,
+        //         )))
+        //     }
+        // }
     }
 
     fn fmt_as(

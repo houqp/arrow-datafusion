@@ -31,6 +31,7 @@ use super::{
     coalesce_partitions::CoalescePartitionsExec, join_utils::check_join_is_valid,
     ColumnStatistics, Statistics,
 };
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::{
     error::{DataFusionError, Result},
     scalar::ScalarValue,
@@ -39,8 +40,8 @@ use async_trait::async_trait;
 use std::time::Instant;
 
 use super::{
-    coalesce_batches::concat_batches, memory::MemoryStream, DisplayFormatType,
-    ExecutionPlan, Partitioning, RecordBatchStream, SendableRecordBatchStream,
+    coalesce_batches::concat_batches, DisplayFormatType, ExecutionPlan, Partitioning,
+    RecordBatchStream, SendableRecordBatchStream,
 };
 use log::debug;
 
@@ -136,65 +137,66 @@ impl ExecutionPlan for CrossJoinExec {
         self.right.output_partitioning()
     }
 
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
-        // we only want to compute the build side once
-        let left_data = {
-            let mut build_side = self.build_side.lock().await;
-
-            match build_side.as_ref() {
-                Some(stream) => stream.clone(),
-                None => {
-                    let start = Instant::now();
-
-                    // merge all left parts into a single stream
-                    let merge = CoalescePartitionsExec::new(self.left.clone());
-                    let stream = merge.execute(0).await?;
-
-                    // Load all batches and count the rows
-                    let (batches, num_rows) = stream
-                        .try_fold((Vec::new(), 0usize), |mut acc, batch| async {
-                            acc.1 += batch.num_rows();
-                            acc.0.push(batch);
-                            Ok(acc)
-                        })
-                        .await?;
-                    let merged_batch =
-                        concat_batches(&self.left.schema(), &batches, num_rows)?;
-                    *build_side = Some(merged_batch.clone());
-
-                    debug!(
-                        "Built build-side of cross join containing {} rows in {} ms",
-                        num_rows,
-                        start.elapsed().as_millis()
-                    );
-
-                    merged_batch
-                }
-            }
-        };
-
-        let stream = self.right.execute(partition).await?;
-
-        if left_data.num_rows() == 0 {
-            return Ok(Box::pin(MemoryStream::try_new(
-                vec![],
-                self.schema.clone(),
-                None,
-            )?));
-        }
-
-        Ok(Box::pin(CrossJoinStream {
-            schema: self.schema.clone(),
-            left_data,
-            right: stream,
-            right_batch: Arc::new(std::sync::Mutex::new(None)),
-            left_index: 0,
-            num_input_batches: 0,
-            num_input_rows: 0,
-            num_output_batches: 0,
-            num_output_rows: 0,
-            join_time: 0,
-        }))
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        Ok(())
+        // // we only want to compute the build side once
+        // let left_data = {
+        //     let mut build_side = self.build_side.lock().await;
+        //
+        //     match build_side.as_ref() {
+        //         Some(stream) => stream.clone(),
+        //         None => {
+        //             let start = Instant::now();
+        //
+        //             // merge all left parts into a single stream
+        //             let merge = CoalescePartitionsExec::new(self.left.clone());
+        //             let stream = merge.execute(0).await?;
+        //
+        //             // Load all batches and count the rows
+        //             let (batches, num_rows) = stream
+        //                 .try_fold((Vec::new(), 0usize), |mut acc, batch| async {
+        //                     acc.1 += batch.num_rows();
+        //                     acc.0.push(batch);
+        //                     Ok(acc)
+        //                 })
+        //                 .await?;
+        //             let merged_batch =
+        //                 concat_batches(&self.left.schema(), &batches, num_rows)?;
+        //             *build_side = Some(merged_batch.clone());
+        //
+        //             debug!(
+        //                 "Built build-side of cross join containing {} rows in {} ms",
+        //                 num_rows,
+        //                 start.elapsed().as_millis()
+        //             );
+        //
+        //             merged_batch
+        //         }
+        //     }
+        // };
+        //
+        // let stream = self.right.execute(partition).await?;
+        //
+        // if left_data.num_rows() == 0 {
+        //     return Ok(Box::pin(MemoryStream::try_new(
+        //         vec![],
+        //         self.schema.clone(),
+        //         None,
+        //     )?));
+        // }
+        //
+        // Ok(Box::pin(CrossJoinStream {
+        //     schema: self.schema.clone(),
+        //     left_data,
+        //     right: stream,
+        //     right_batch: Arc::new(std::sync::Mutex::new(None)),
+        //     left_index: 0,
+        //     num_input_batches: 0,
+        //     num_input_rows: 0,
+        //     num_output_batches: 0,
+        //     num_output_rows: 0,
+        //     join_time: 0,
+        // }))
     }
 
     fn fmt_as(
