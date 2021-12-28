@@ -34,7 +34,7 @@ use super::common::AbortOnDropMany;
 use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{RecordBatchStream, Statistics};
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::{ConsumeStatus, Consumer};
+use crate::physical_plan::{ConsumeStatus, Consumer, PassthroughConsumer};
 use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning};
 
 use super::SendableRecordBatchStream;
@@ -122,11 +122,14 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 let elapsed_compute = baseline_metrics.elapsed_compute().clone();
                 let _timer = elapsed_compute.timer();
 
+                let mut passthrough = PassthroughConsumer { consumer };
+
                 for part_i in 0..input_partitions {
                     // FIXME: execute in parallel
-                    self.input.execute(part_i, consumer).await?;
+                    self.input.execute(part_i, &mut passthrough).await?;
                 }
-                Ok(())
+                // only signal finish at the end
+                consumer.finish()
             }
         }
     }

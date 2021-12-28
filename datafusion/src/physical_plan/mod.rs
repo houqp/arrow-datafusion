@@ -142,6 +142,22 @@ impl Consumer for Vec<RecordBatch> {
     }
 }
 
+/// Pass through consumer wrapper that passes consume method calls to its child, but not finish
+/// calls.
+struct PassthroughConsumer<'a> {
+    consumer: &'a mut dyn Consumer,
+}
+
+impl<'a> Consumer for PassthroughConsumer<'a> {
+    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+        self.consumer.consume(batch)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// `ExecutionPlan` represent nodes in the DataFusion Physical Plan.
 ///
 /// Each `ExecutionPlan` is Partition-aware and is responsible for
