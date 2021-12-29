@@ -148,6 +148,7 @@ impl ExecutionPlan for CoalesceBatchesExec {
     }
 }
 
+#[derive(Debug)]
 struct BatchCoalescer<'a> {
     /// The input schema
     schema: SchemaRef,
@@ -215,18 +216,15 @@ impl<'a> Consumer for BatchCoalescer<'a> {
     fn finish(&mut self) -> Result<()> {
         // we have reached the end of the input stream but there could still
         // be buffered batches
-        if self.buffer.is_empty() {
-            return Ok(());
+        if !self.buffer.is_empty() {
+            // combine the batches and return
+            let batch = concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
+            // reset buffer state
+            self.buffer.clear();
+            self.buffered_rows = 0;
+            // push batch downstream
+            self.consumer.consume(batch)?;
         }
-
-        // combine the batches and return
-        let batch = concat_batches(&self.schema, &self.buffer, self.buffered_rows)?;
-        // reset buffer state
-        self.buffer.clear();
-        self.buffered_rows = 0;
-
-        // push batch downstream
-        self.consumer.consume(batch)?;
         self.consumer.finish()
     }
 }
@@ -264,6 +262,48 @@ mod tests {
     use crate::physical_plan::{memory::MemoryExec, repartition::RepartitionExec};
     use arrow::array::UInt32Array;
     use arrow::datatypes::{DataType, Field, Schema};
+
+    #[tokio::test]
+    async fn empty_record_batches() -> Result<()> {
+        // downstream consumer's consume and finish methods need to be invoked even though all
+        // record batches contain 0 rows
+
+        let schema =
+            Arc::new(Schema::new(vec![Field::new("a", DataType::UInt32, false)]));
+        let empty_batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(UInt32Array::from(Vec::<u32>::new()))],
+        )?;
+        let plan = MemoryExec::try_new(vec![vec![empty_batch]], schema, None)?;
+        let plan = CoalesceBatchesExec::new(Arc::new(plan), 1024);
+
+        #[derive(Debug)]
+        struct DummyConsumer {
+            consume_called: bool,
+            finish_called: bool,
+        }
+
+        impl Consumer for DummyConsumer {
+            fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+                self.consume_called = true;
+                Ok(ConsumeStatus::Continue)
+            }
+            fn finish(&mut self) -> Result<()> {
+                self.finish_called = true;
+                Ok(())
+            }
+        }
+
+        let mut consumer = DummyConsumer {
+            consume_called: false,
+            finish_called: false,
+        };
+        plan.execute(0, &mut consumer).await?;
+
+        assert_eq!(consumer.consume_called, true);
+        assert_eq!(consumer.finish_called, true);
+        Ok(())
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concat_batches() -> Result<()> {
@@ -313,7 +353,7 @@ mod tests {
         target_batch_size: usize,
     ) -> Result<Vec<Vec<RecordBatch>>> {
         // create physical plan
-        let exec = MemoryExec::try_new(&input_partitions, schema.clone(), None)?;
+        let exec = MemoryExec::try_new(input_partitions, schema.clone(), None)?;
         let exec =
             RepartitionExec::try_new(Arc::new(exec), Partitioning::RoundRobinBatch(1))?;
         let exec: Arc<dyn ExecutionPlan> =
@@ -324,11 +364,8 @@ mod tests {
         let mut output_partitions = Vec::with_capacity(output_partition_count);
         for i in 0..output_partition_count {
             // execute this *output* partition and collect all batches
-            let mut stream = exec.execute(i).await?;
             let mut batches = vec![];
-            while let Some(result) = stream.next().await {
-                batches.push(result?);
-            }
+            exec.execute(i, &mut batches).await?;
             output_partitions.push(batches);
         }
         Ok(output_partitions)

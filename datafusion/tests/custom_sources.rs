@@ -22,6 +22,7 @@ use arrow::error::Result as ArrowResult;
 use arrow::record_batch::RecordBatch;
 
 use datafusion::physical_plan::empty::EmptyExec;
+use datafusion::physical_plan::Consumer;
 use datafusion::scalar::ScalarValue;
 use datafusion::{datasource::TableProvider, physical_plan::collect};
 use datafusion::{
@@ -54,10 +55,7 @@ struct CustomTableProvider;
 struct CustomExecutionPlan {
     projection: Option<Vec<usize>>,
 }
-struct TestCustomRecordBatchStream {
-    /// the nb of batches of TEST_CUSTOM_RECORD_BATCH generated
-    nb_batch: i32,
-}
+
 macro_rules! TEST_CUSTOM_SCHEMA_REF {
     () => {
         Arc::new(Schema::new(vec![
@@ -76,28 +74,6 @@ macro_rules! TEST_CUSTOM_RECORD_BATCH {
             ],
         )
     };
-}
-
-impl RecordBatchStream for TestCustomRecordBatchStream {
-    fn schema(&self) -> SchemaRef {
-        TEST_CUSTOM_SCHEMA_REF!()
-    }
-}
-
-impl Stream for TestCustomRecordBatchStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.nb_batch > 0 {
-            self.get_mut().nb_batch -= 1;
-            Poll::Ready(Some(TEST_CUSTOM_RECORD_BATCH!()))
-        } else {
-            Poll::Ready(None)
-        }
-    }
 }
 
 #[async_trait]
@@ -132,8 +108,13 @@ impl ExecutionPlan for CustomExecutionPlan {
             ))
         }
     }
-    async fn execute(&self, _partition: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(TestCustomRecordBatchStream { nb_batch: 1 }))
+    async fn execute(
+        &self,
+        _partition: usize,
+        consumer: &mut dyn Consumer,
+    ) -> Result<()> {
+        consumer.consume(TEST_CUSTOM_RECORD_BATCH!()?)?;
+        consumer.finish()
     }
 
     fn fmt_as(

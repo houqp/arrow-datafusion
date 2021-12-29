@@ -160,8 +160,9 @@ mod tests {
 
         // scan with projection
         let exec = provider.scan(&Some(vec![2, 1]), 1024, &[], None).await?;
-        let mut it = exec.execute(0).await?;
-        let batch2 = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
+        let batch2 = &batches[0];
         assert_eq!(2, batch2.schema().fields().len());
         assert_eq!("c", batch2.schema().field(0).name());
         assert_eq!("b", batch2.schema().field(1).name());
@@ -190,8 +191,9 @@ mod tests {
         let provider = MemTable::try_new(schema, vec![vec![batch]])?;
 
         let exec = provider.scan(&None, 1024, &[], None).await?;
-        let mut it = exec.execute(0).await?;
-        let batch1 = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
+        let batch1 = &batches[0];
         assert_eq!(3, batch1.schema().fields().len());
         assert_eq!(3, batch1.num_columns());
 
@@ -341,8 +343,9 @@ mod tests {
             MemTable::try_new(Arc::new(merged_schema), vec![vec![batch1, batch2]])?;
 
         let exec = provider.scan(&None, 1024, &[], None).await?;
-        let mut it = exec.execute(0).await?;
-        let batch1 = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
+        let batch1 = &batches[0];
         assert_eq!(3, batch1.schema().fields().len());
         assert_eq!(3, batch1.num_columns());
 

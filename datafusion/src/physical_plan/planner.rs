@@ -48,6 +48,7 @@ use crate::physical_plan::repartition::RepartitionExec;
 use crate::physical_plan::sort::SortExec;
 use crate::physical_plan::udf;
 use crate::physical_plan::windows::WindowAggExec;
+use crate::physical_plan::Consumer;
 use crate::physical_plan::{join_utils, Partitioning};
 use crate::physical_plan::{AggregateExpr, ExecutionPlan, PhysicalExpr, WindowExpr};
 use crate::scalar::ScalarValue;
@@ -1920,7 +1921,11 @@ mod tests {
             unimplemented!("NoOpExecutionPlan::with_new_children");
         }
 
-        async fn execute(&self, _partition: usize) -> Result<SendableRecordBatchStream> {
+        async fn execute(
+            &self,
+            _partition: usize,
+            _consumer: &mut dyn Consumer,
+        ) -> Result<()> {
             unimplemented!("NoOpExecutionPlan::execute");
         }
 

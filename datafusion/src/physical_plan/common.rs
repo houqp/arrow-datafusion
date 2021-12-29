@@ -302,7 +302,11 @@ mod tests {
             Field::new("f32", DataType::Float32, false),
             Field::new("f64", DataType::Float64, false),
         ]));
-        let stats = compute_record_batch_statistics(&[], &schema, Some(vec![0, 1]));
+        let stats = compute_record_batch_statistics(
+            std::iter::empty(),
+            &schema,
+            Some(vec![0, 1]),
+        );
 
         assert_eq!(stats.num_rows, Some(0));
         assert!(stats.is_exact);
@@ -323,8 +327,11 @@ mod tests {
                 Arc::new(Float64Array::from(vec![9., 8., 7.])),
             ],
         )?;
-        let result =
-            compute_record_batch_statistics(&[vec![batch]], &schema, Some(vec![0, 1]));
+        let result = compute_record_batch_statistics(
+            vec![[batch].as_slice()],
+            &schema,
+            Some(vec![0, 1]),
+        );
 
         let expected = Statistics {
             is_exact: true,

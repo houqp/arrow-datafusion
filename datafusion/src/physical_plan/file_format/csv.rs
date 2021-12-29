@@ -196,8 +196,9 @@ mod tests {
         assert_eq!(3, csv.projected_schema.fields().len());
         assert_eq!(3, csv.schema().fields().len());
 
-        let mut stream = csv.execute(0).await?;
-        let batch = stream.next().await.unwrap()?;
+        let mut batches = vec![];
+        csv.execute(0, &mut batches).await?;
+        let batch = &batches[0];
         assert_eq!(3, batch.num_columns());
         assert_eq!(100, batch.num_rows());
 
@@ -242,8 +243,9 @@ mod tests {
         assert_eq!(13, csv.projected_schema.fields().len());
         assert_eq!(13, csv.schema().fields().len());
 
-        let mut it = csv.execute(0).await?;
-        let batch = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        csv.execute(0, &mut batches).await?;
+        let batch = &batches[0];
         assert_eq!(13, batch.num_columns());
         assert_eq!(5, batch.num_rows());
 
@@ -259,7 +261,7 @@ mod tests {
             "+----+----+-----+--------+------------+----------------------+-----+-------+------------+----------------------+-------------+---------------------+--------------------------------+",
         ];
 
-        crate::assert_batches_eq!(expected, &[batch]);
+        crate::assert_batches_eq!(expected, &batches);
 
         Ok(())
     }
@@ -295,8 +297,9 @@ mod tests {
         assert_eq!(2, csv.projected_schema.fields().len());
         assert_eq!(2, csv.schema().fields().len());
 
-        let mut it = csv.execute(0).await?;
-        let batch = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        csv.execute(0, &mut batches).await?;
+        let batch = &batches[0];
         assert_eq!(2, batch.num_columns());
         assert_eq!(100, batch.num_rows());
 

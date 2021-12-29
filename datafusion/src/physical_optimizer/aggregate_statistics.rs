@@ -282,7 +282,7 @@ mod tests {
         )?;
 
         Ok(Arc::new(MemoryExec::try_new(
-            &[vec![batch]],
+            vec![vec![batch]],
             Arc::clone(&schema),
             None,
         )?))
@@ -303,10 +303,11 @@ mod tests {
 
         // A ProjectionExec is a sign that the count optimization was applied
         assert!(optimized.as_any().is::<ProjectionExec>());
-        let result = common::collect(optimized.execute(0).await?).await?;
-        assert_eq!(result[0].schema(), Arc::new(Schema::new(vec![col])));
+        let mut batches = vec![];
+        optimized.execute(0, &mut batches).await?;
+        assert_eq!(batches[0].schema(), Arc::new(Schema::new(vec![col])));
         assert_eq!(
-            result[0]
+            batches[0]
                 .column(0)
                 .as_any()
                 .downcast_ref::<UInt64Array>()

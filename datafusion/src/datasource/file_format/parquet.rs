@@ -351,16 +351,16 @@ mod tests {
     async fn read_small_batches() -> Result<()> {
         let projection = None;
         let exec = get_exec("alltypes_plain.parquet", &projection, 2, None).await?;
-        let stream = exec.execute(0).await?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
 
-        let tt_batches = stream
+        let tt_batches = batches
+            .iter()
             .map(|batch| {
-                let batch = batch.unwrap();
                 assert_eq!(11, batch.num_columns());
                 assert_eq!(2, batch.num_rows());
             })
-            .fold(0, |acc, _| async move { acc + 1i32 })
-            .await;
+            .fold(0, |acc, _| acc + 1i32);
 
         assert_eq!(tt_batches, 4 /* 8/2 */);
 

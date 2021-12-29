@@ -117,6 +117,9 @@ impl ExecutionPlan for EmptyExec {
                 partition
             )));
         }
+        for batch in self.data()? {
+            consumer.consume(batch)?;
+        }
         consumer.finish()
     }
 
@@ -153,8 +156,8 @@ mod tests {
         assert_eq!(empty.schema(), schema);
 
         // we should have no results
-        let iter = empty.execute(0).await?;
-        let batches = common::collect(iter).await?;
+        let mut batches = vec![];
+        empty.execute(0, &mut batches).await?;
         assert!(batches.is_empty());
 
         Ok(())
@@ -182,8 +185,8 @@ mod tests {
         let empty = EmptyExec::new(false, schema);
 
         // ask for the wrong partition
-        assert!(empty.execute(1).await.is_err());
-        assert!(empty.execute(20).await.is_err());
+        assert!(empty.execute(1, &mut vec![]).await.is_err());
+        assert!(empty.execute(20, &mut vec![]).await.is_err());
         Ok(())
     }
 
@@ -192,8 +195,8 @@ mod tests {
         let schema = test_util::aggr_test_schema();
         let empty = EmptyExec::new(true, schema);
 
-        let iter = empty.execute(0).await?;
-        let batches = common::collect(iter).await?;
+        let mut batches = vec![];
+        empty.execute(0, &mut batches).await?;
 
         // should have one item
         assert_eq!(batches.len(), 1);

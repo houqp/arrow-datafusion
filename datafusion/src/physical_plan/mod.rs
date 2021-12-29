@@ -55,37 +55,6 @@ pub trait RecordBatchStream: Stream<Item = ArrowResult<RecordBatch>> {
 /// Trait for a stream of record batches.
 pub type SendableRecordBatchStream = Pin<Box<dyn RecordBatchStream + Send + Sync>>;
 
-/// EmptyRecordBatchStream can be used to create a RecordBatchStream
-/// that will produce no results
-pub struct EmptyRecordBatchStream {
-    /// Schema
-    schema: SchemaRef,
-}
-
-impl EmptyRecordBatchStream {
-    /// Create an empty RecordBatchStream
-    pub fn new(schema: SchemaRef) -> Self {
-        Self { schema }
-    }
-}
-
-impl RecordBatchStream for EmptyRecordBatchStream {
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-}
-
-impl Stream for EmptyRecordBatchStream {
-    type Item = ArrowResult<RecordBatch>;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Poll::Ready(None)
-    }
-}
-
 /// Physical planner interface
 pub use self::planner::PhysicalPlanner;
 
@@ -126,7 +95,7 @@ pub enum ConsumeStatus {
     Terminate,
 }
 
-pub trait Consumer: Send {
+pub trait Consumer: Send + Debug {
     // consumer that can trigger early termination like Limit exec should leverage try_consume
     fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus>;
 
@@ -144,6 +113,7 @@ impl Consumer for Vec<RecordBatch> {
 
 /// Pass through consumer wrapper that passes consume method calls to its child, but not finish
 /// calls.
+#[derive(Debug)]
 struct PassthroughConsumer<'a> {
     consumer: &'a mut dyn Consumer,
 }

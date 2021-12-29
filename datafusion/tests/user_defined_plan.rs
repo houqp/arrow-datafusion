@@ -75,8 +75,9 @@ use datafusion::{
     optimizer::{optimizer::OptimizerRule, utils::optimize_children},
     physical_plan::{
         planner::{DefaultPhysicalPlanner, ExtensionPlanner},
-        DisplayFormatType, Distribution, ExecutionPlan, Partitioning, PhysicalPlanner,
-        RecordBatchStream, SendableRecordBatchStream, Statistics,
+        ConsumeStatus, Consumer, DisplayFormatType, Distribution, ExecutionPlan,
+        Partitioning, PhysicalPlanner, RecordBatchStream, SendableRecordBatchStream,
+        Statistics,
     },
     prelude::{ExecutionConfig, ExecutionContext},
 };
@@ -453,7 +454,7 @@ impl ExecutionPlan for TopKExec {
     }
 
     /// Execute one partition and return an iterator over RecordBatch
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         if 0 != partition {
             return Err(DataFusionError::Internal(format!(
                 "TopKExec invalid partition {}",
@@ -461,12 +462,51 @@ impl ExecutionPlan for TopKExec {
             )));
         }
 
-        Ok(Box::pin(TopKReader {
-            input: self.input.execute(partition).await?,
+        // A very specialized TopK implementation
+        #[derive(Debug)]
+        struct TopKReader<'a> {
+            consumer: &'a mut dyn Consumer,
+            schema: SchemaRef,
+            /// Maximum number of output values
+            k: usize,
+            /// Have we produced the output yet?
+            done: bool,
+            /// Output
+            state: BTreeMap<i64, String>,
+        }
+
+        impl<'a> Consumer for TopKReader<'a> {
+            fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+                self.state = accumulate_batch(&batch, self.state.clone(), self.k);
+                self.consumer
+                    .consume(RecordBatch::new_empty(self.schema.clone()))
+            }
+
+            fn finish(&mut self) -> Result<()> {
+                let (revenue, customer): (Vec<i64>, Vec<&String>) =
+                    self.state.iter().rev().unzip();
+
+                let customer: Vec<&str> = customer.iter().map(|&s| &**s).collect();
+                let batch = RecordBatch::try_new(
+                    self.schema.clone(),
+                    vec![
+                        Arc::new(StringArray::from(customer)),
+                        Arc::new(Int64Array::from(revenue)),
+                    ],
+                )?;
+                self.consumer.consume(batch)?;
+                self.consumer.finish()
+            }
+        }
+
+        let mut topk_reader = TopKReader {
             k: self.k,
             done: false,
             state: BTreeMap::new(),
-        }))
+            schema: self.input.schema().clone(),
+            consumer,
+        };
+        self.input.execute(partition, &mut topk_reader).await
     }
 
     fn fmt_as(
@@ -488,29 +528,17 @@ impl ExecutionPlan for TopKExec {
     }
 }
 
-// A very specialized TopK implementation
-struct TopKReader {
-    /// The input to read data from
-    input: SendableRecordBatchStream,
-    /// Maximum number of output values
-    k: usize,
-    /// Have we produced the output yet?
-    done: bool,
-    /// Output
-    state: BTreeMap<i64, String>,
-}
-
 /// Keeps track of the revenue from customer_id and stores if it
 /// is the top values we have seen so far.
 fn add_row(
     top_values: &mut BTreeMap<i64, String>,
     customer_id: &str,
     revenue: i64,
-    k: &usize,
+    k: usize,
 ) {
     top_values.insert(revenue, customer_id.into());
     // only keep top k
-    while top_values.len() > *k {
+    while top_values.len() > k {
         remove_lowest_value(top_values)
     }
 }
@@ -529,7 +557,7 @@ fn remove_lowest_value(top_values: &mut BTreeMap<i64, String>) {
 fn accumulate_batch(
     input_batch: &RecordBatch,
     mut top_values: BTreeMap<i64, String>,
-    k: &usize,
+    k: usize,
 ) -> BTreeMap<i64, String> {
     let num_rows = input_batch.num_rows();
     // Assuming the input columns are
@@ -556,51 +584,4 @@ fn accumulate_batch(
         );
     }
     top_values
-}
-
-impl Stream for TopKReader {
-    type Item = std::result::Result<RecordBatch, ArrowError>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.done {
-            return Poll::Ready(None);
-        }
-        // this aggregates and thus returns a single RecordBatch.
-
-        // take this as immutable
-        let k = self.k;
-        let schema = self.schema();
-        let poll = self.input.poll_next_unpin(cx);
-
-        match poll {
-            Poll::Ready(Some(Ok(batch))) => {
-                self.state = accumulate_batch(&batch, self.state.clone(), &k);
-                Poll::Ready(Some(Ok(RecordBatch::new_empty(schema))))
-            }
-            Poll::Ready(None) => {
-                self.done = true;
-                let (revenue, customer): (Vec<i64>, Vec<&String>) =
-                    self.state.iter().rev().unzip();
-
-                let customer: Vec<&str> = customer.iter().map(|&s| &**s).collect();
-                Poll::Ready(Some(RecordBatch::try_new(
-                    schema,
-                    vec![
-                        Arc::new(StringArray::from(customer)),
-                        Arc::new(Int64Array::from(revenue)),
-                    ],
-                )))
-            }
-            other => other,
-        }
-    }
-}
-
-impl RecordBatchStream for TopKReader {
-    fn schema(&self) -> SchemaRef {
-        self.input.schema()
-    }
 }

@@ -339,8 +339,9 @@ mod tests {
             Arc::new(vec![3, 2, 1].into_iter().map(Some).collect::<UInt64Array>());
 
         let batch = RecordBatch::try_new(schema.clone(), vec![data]).unwrap();
-        let input =
-            Arc::new(MemoryExec::try_new(&[vec![batch]], schema.clone(), None).unwrap());
+        let input = Arc::new(
+            MemoryExec::try_new(vec![vec![batch]], schema.clone(), None).unwrap(),
+        );
 
         let sort_exec = Arc::new(SortExec::try_new(
             vec![PhysicalSortExpr {
@@ -421,7 +422,7 @@ mod tests {
                     },
                 },
             ],
-            Arc::new(MemoryExec::try_new(&[vec![batch]], schema, None)?),
+            Arc::new(MemoryExec::try_new(vec![vec![batch]], schema, None)?),
         )?);
 
         assert_eq!(DataType::Float32, *sort_exec.schema().field(0).data_type());

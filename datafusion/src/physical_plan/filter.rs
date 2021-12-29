@@ -150,6 +150,7 @@ impl ExecutionPlan for FilterExec {
     }
 }
 
+#[derive(Debug)]
 struct Filter<'a> {
     consumer: &'a mut dyn Consumer,
     /// The expression to filter on. This expression must evaluate to a boolean value.

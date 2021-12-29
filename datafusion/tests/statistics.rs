@@ -25,7 +25,7 @@ use datafusion::{
     error::{DataFusionError, Result},
     logical_plan::Expr,
     physical_plan::{
-        ColumnStatistics, DisplayFormatType, ExecutionPlan, Partitioning,
+        ColumnStatistics, Consumer, DisplayFormatType, ExecutionPlan, Partitioning,
         SendableRecordBatchStream, Statistics,
     },
     prelude::ExecutionContext,
@@ -144,7 +144,7 @@ impl ExecutionPlan for StatisticsValidation {
         }
     }
 
-    async fn execute(&self, _partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, _: usize, _: &mut dyn Consumer) -> Result<()> {
         unimplemented!("This plan only serves for testing statistics")
     }
 

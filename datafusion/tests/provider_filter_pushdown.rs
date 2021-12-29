@@ -24,6 +24,7 @@ use datafusion::error::Result;
 use datafusion::execution::context::ExecutionContext;
 use datafusion::logical_plan::Expr;
 use datafusion::physical_plan::common::SizedRecordBatchStream;
+use datafusion::physical_plan::Consumer;
 use datafusion::physical_plan::{
     DisplayFormatType, ExecutionPlan, Partitioning, SendableRecordBatchStream, Statistics,
 };
@@ -50,7 +51,7 @@ fn create_batch(value: i32, num_rows: usize) -> Result<RecordBatch> {
 #[derive(Debug)]
 struct CustomPlan {
     schema: SchemaRef,
-    batches: Vec<Arc<RecordBatch>>,
+    batches: Vec<RecordBatch>,
 }
 
 #[async_trait]
@@ -78,11 +79,11 @@ impl ExecutionPlan for CustomPlan {
         unreachable!()
     }
 
-    async fn execute(&self, _: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(SizedRecordBatchStream::new(
-            self.schema(),
-            self.batches.clone(),
-        )))
+    async fn execute(&self, _: usize, consumer: &mut dyn Consumer) -> Result<()> {
+        for batch in &self.batches {
+            consumer.consume(batch.clone())?;
+        }
+        consumer.finish()
     }
 
     fn fmt_as(
@@ -137,8 +138,8 @@ impl TableProvider for CustomProvider {
                 Ok(Arc::new(CustomPlan {
                     schema: self.zero_batch.schema(),
                     batches: match int_value {
-                        0 => vec![Arc::new(self.zero_batch.clone())],
-                        1 => vec![Arc::new(self.one_batch.clone())],
+                        0 => vec![self.zero_batch.clone()],
+                        1 => vec![self.one_batch.clone()],
                         _ => vec![],
                     },
                 }))

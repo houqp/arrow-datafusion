@@ -192,8 +192,9 @@ mod tests {
             &DataType::Utf8
         );
 
-        let mut it = exec.execute(0).await?;
-        let batch = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
+        let batch = &batches[0];
 
         assert_eq!(batch.num_rows(), 3);
         let values = batch
@@ -229,8 +230,9 @@ mod tests {
         inferred_schema.field_with_name("c").unwrap();
         inferred_schema.field_with_name("d").unwrap_err();
 
-        let mut it = exec.execute(0).await?;
-        let batch = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
+        let batch = &batches[0];
 
         assert_eq!(batch.num_rows(), 4);
         let values = batch

@@ -211,7 +211,7 @@ mod tests {
     async fn test_with_projection() -> Result<()> {
         let (schema, batch) = mock_data()?;
 
-        let executor = MemoryExec::try_new(&[vec![batch]], schema, Some(vec![2, 1]))?;
+        let executor = MemoryExec::try_new(vec![vec![batch]], schema, Some(vec![2, 1]))?;
         let statistics = executor.statistics();
 
         assert_eq!(statistics.num_rows, Some(3));
@@ -234,8 +234,9 @@ mod tests {
         );
 
         // scan with projection
-        let mut it = executor.execute(0).await?;
-        let batch2 = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        executor.execute(0, &mut batches).await?;
+        let batch2 = &batches[0];
         assert_eq!(2, batch2.schema().fields().len());
         assert_eq!("c", batch2.schema().field(0).name());
         assert_eq!("b", batch2.schema().field(1).name());
@@ -248,7 +249,7 @@ mod tests {
     async fn test_without_projection() -> Result<()> {
         let (schema, batch) = mock_data()?;
 
-        let executor = MemoryExec::try_new(&[vec![batch]], schema, None)?;
+        let executor = MemoryExec::try_new(vec![vec![batch]], schema, None)?;
         let statistics = executor.statistics();
 
         assert_eq!(statistics.num_rows, Some(3));
@@ -282,8 +283,9 @@ mod tests {
             ])
         );
 
-        let mut it = executor.execute(0).await?;
-        let batch1 = it.next().await.unwrap()?;
+        let mut batches = vec![];
+        executor.execute(0, &mut batches).await?;
+        let batch1 = &batches[0];
         assert_eq!(4, batch1.schema().fields().len());
         assert_eq!(4, batch1.num_columns());
 

@@ -200,8 +200,8 @@ mod tests {
         assert_eq!(merge.output_partitioning().partition_count(), 1);
 
         // the result should contain 4 batches (one per input partition)
-        let iter = merge.execute(0).await?;
-        let batches = common::collect(iter).await?;
+        let mut batches = vec![];
+        merge.execute(0, &mut batches).await?;
         assert_eq!(batches.len(), num_partitions);
 
         // there should be a total of 100 rows

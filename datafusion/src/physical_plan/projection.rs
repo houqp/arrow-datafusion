@@ -229,6 +229,7 @@ fn stats_projection(
     }
 }
 
+#[derive(Debug)]
 struct Projector<'a> {
     consumer: &'a mut dyn Consumer,
     expr: Vec<Arc<dyn PhysicalExpr>>,
@@ -309,16 +310,15 @@ mod tests {
         let mut row_count = 0;
         for partition in 0..projection.output_partitioning().partition_count() {
             partition_count += 1;
-            let stream = projection.execute(partition).await?;
-
-            row_count += stream
+            let mut batches = Vec::new();
+            projection.execute(partition, &mut batches).await?;
+            row_count += batches
+                .iter()
                 .map(|batch| {
-                    let batch = batch.unwrap();
                     assert_eq!(1, batch.num_columns());
                     batch.num_rows()
                 })
-                .fold(0, |acc, x| future::ready(acc + x))
-                .await;
+                .fold(0, |acc, x| acc + x);
         }
         assert_eq!(partitions, partition_count);
         assert_eq!(100, row_count);

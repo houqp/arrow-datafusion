@@ -508,8 +508,10 @@ mod tests {
         );
         assert_eq!(parquet_exec.output_partitioning().partition_count(), 1);
 
-        let mut results = parquet_exec.execute(0).await?;
-        let batch = results.next().await.unwrap()?;
+        let mut batches = vec![];
+        parquet_exec.execute(0, &mut batches).await?;
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
 
         assert_eq!(8, batch.num_rows());
         assert_eq!(3, batch.num_columns());
@@ -518,15 +520,6 @@ mod tests {
         let field_names: Vec<&str> =
             schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(vec!["id", "bool_col", "tinyint_col"], field_names);
-
-        let batch = results.next().await;
-        assert!(batch.is_none());
-
-        let batch = results.next().await;
-        assert!(batch.is_none());
-
-        let batch = results.next().await;
-        assert!(batch.is_none());
 
         Ok(())
     }
@@ -563,8 +556,8 @@ mod tests {
         );
         assert_eq!(parquet_exec.output_partitioning().partition_count(), 1);
 
-        let mut results = parquet_exec.execute(0).await?;
-        let batch = results.next().await.unwrap()?;
+        let mut batches = vec![];
+        parquet_exec.execute(0, &mut batches).await?;
         let expected = vec![
             "+----+----------+-------------+-------+",
             "| id | bool_col | tinyint_col | month |",
@@ -579,10 +572,7 @@ mod tests {
             "| 1  | false    | 1           | 10    |",
             "+----+----------+-------------+-------+",
         ];
-        crate::assert_batches_eq!(expected, &[batch]);
-
-        let batch = results.next().await;
-        assert!(batch.is_none());
+        crate::assert_batches_eq!(expected, &batches);
 
         Ok(())
     }

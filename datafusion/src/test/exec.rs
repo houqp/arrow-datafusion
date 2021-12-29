@@ -33,6 +33,7 @@ use arrow::{
 };
 use futures::Stream;
 
+use crate::physical_plan::Consumer;
 use crate::physical_plan::{
     common, DisplayFormatType, ExecutionPlan, Partitioning, RecordBatchStream,
     SendableRecordBatchStream, Statistics,
@@ -162,7 +163,7 @@ impl ExecutionPlan for MockExec {
     }
 
     /// Returns a stream which yields data
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         assert_eq!(partition, 0);
 
         // Result doesn't implement clone, so do it ourself
@@ -175,26 +176,10 @@ impl ExecutionPlan for MockExec {
             })
             .collect();
 
-        let (tx, rx) = tokio::sync::mpsc::channel(2);
-
-        // task simply sends data in order but in a separate
-        // thread (to ensure the batches are not available without the
-        // DelayedStream yielding).
-        let join_handle = tokio::task::spawn(async move {
-            for batch in data {
-                println!("Sending batch via delayed stream");
-                if let Err(e) = tx.send(batch).await {
-                    println!("ERROR batch via delayed stream: {}", e);
-                }
-            }
-        });
-
-        // returned stream simply reads off the rx stream
-        Ok(RecordBatchReceiverStream::create(
-            &self.schema,
-            rx,
-            join_handle,
-        ))
+        for batch in data {
+            consumer.consume(batch?)?;
+        }
+        consumer.finish()
     }
 
     fn fmt_as(
@@ -220,9 +205,11 @@ impl ExecutionPlan for MockExec {
             })
             .collect();
 
-        let data = data.unwrap();
-
-        common::compute_record_batch_statistics(&[data], &self.schema, None)
+        common::compute_record_batch_statistics(
+            vec![data.unwrap().as_slice()],
+            &self.schema,
+            None,
+        )
     }
 }
 
@@ -293,31 +280,15 @@ impl ExecutionPlan for BarrierExec {
     }
 
     /// Returns a stream which yields data
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         assert!(partition < self.data.len());
-
-        let (tx, rx) = tokio::sync::mpsc::channel(2);
-
         // task simply sends data in order after barrier is reached
         let data = self.data[partition].clone();
-        let b = self.barrier.clone();
-        let join_handle = tokio::task::spawn(async move {
-            println!("Partition {} waiting on barrier", partition);
-            b.wait().await;
-            for batch in data {
-                println!("Partition {} sending batch", partition);
-                if let Err(e) = tx.send(Ok(batch)).await {
-                    println!("ERROR batch via barrier stream stream: {}", e);
-                }
-            }
-        });
-
-        // returned stream simply reads off the rx stream
-        Ok(RecordBatchReceiverStream::create(
-            &self.schema,
-            rx,
-            join_handle,
-        ))
+        self.barrier.wait().await;
+        for batch in data {
+            consumer.consume(batch)?;
+        }
+        consumer.finish()
     }
 
     fn fmt_as(
@@ -333,7 +304,11 @@ impl ExecutionPlan for BarrierExec {
     }
 
     fn statistics(&self) -> Statistics {
-        common::compute_record_batch_statistics(&self.data, &self.schema, None)
+        common::compute_record_batch_statistics(
+            self.data.iter().map(|batches| batches.as_slice()),
+            &self.schema,
+            None,
+        )
     }
 }
 
@@ -379,7 +354,11 @@ impl ExecutionPlan for ErrorExec {
     }
 
     /// Returns a stream which yields data
-    async fn execute(&self, partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(
+        &self,
+        partition: usize,
+        _consumer: &mut dyn Consumer,
+    ) -> Result<()> {
         Err(DataFusionError::Internal(format!(
             "ErrorExec, unsurprisingly, errored in partition {}",
             partition
@@ -456,7 +435,11 @@ impl ExecutionPlan for StatisticsExec {
         }
     }
 
-    async fn execute(&self, _partition: usize) -> Result<SendableRecordBatchStream> {
+    async fn execute(
+        &self,
+        _partition: usize,
+        _consumer: &mut dyn Consumer,
+    ) -> Result<()> {
         unimplemented!("This plan only serves for testing statistics")
     }
 
@@ -546,11 +529,18 @@ impl ExecutionPlan for BlockingExec {
         )))
     }
 
-    async fn execute(&self, _partition: usize) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(BlockingStream {
+    async fn execute(
+        &self,
+        _partition: usize,
+        _consumer: &mut dyn Consumer,
+    ) -> Result<()> {
+        use futures::StreamExt;
+        let mut stream = BlockingStream {
             schema: Arc::clone(&self.schema),
             _refs: Arc::clone(&self.refs),
-        }))
+        };
+        stream.next().await;
+        Ok(())
     }
 
     fn fmt_as(

@@ -152,16 +152,16 @@ mod tests {
         // skip column 9 that overflows the automaticly discovered column type of i64 (u64 would work)
         let projection = Some(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]);
         let exec = get_exec("aggregate_test_100.csv", &projection, 2, None).await?;
-        let stream = exec.execute(0).await?;
+        let mut batches = vec![];
+        exec.execute(0, &mut batches).await?;
 
-        let tt_batches: i32 = stream
+        let tt_batches: i32 = batches
+            .iter()
             .map(|batch| {
-                let batch = batch.unwrap();
                 assert_eq!(12, batch.num_columns());
                 assert_eq!(2, batch.num_rows());
             })
-            .fold(0, |acc, _| async move { acc + 1i32 })
-            .await;
+            .fold(0, |acc, _| acc + 1i32);
 
         assert_eq!(tt_batches, 50 /* 100/2 */);
 
