@@ -375,10 +375,11 @@ impl<'a> HashAggregator<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Consumer for HashAggregator<'a> {
     // 1 for each batch, update / merge accumulators with the expressions' values
     // future is ready when all batches are computed
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let timer = self.elapsed_compute.timer();
         aggregate_batch(&self.mode, batch, &mut self.accumulators, &self.expressions)
             .map_err(DataFusionError::into_arrow_external_error)?;
@@ -387,14 +388,14 @@ impl<'a> Consumer for HashAggregator<'a> {
     }
 
     // 2. convert values to a record batch
-    fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<()> {
         let timer = self.elapsed_compute.timer();
         let batch = finalize_aggregation(&self.accumulators, &self.mode)
             .map(|columns| RecordBatch::try_new(self.schema.clone(), columns))
             .map_err(DataFusionError::into_arrow_external_error)??;
         timer.done();
-        self.consumer.consume(batch)?;
-        self.consumer.finish()
+        self.consumer.consume(batch).await?;
+        self.consumer.finish().await
     }
 }
 
@@ -449,8 +450,9 @@ impl<'a> GroupedHashAggregator<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Consumer for GroupedHashAggregator<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let timer = self.elapsed_compute.timer();
         group_aggregate_batch(
             &self.mode,
@@ -466,7 +468,7 @@ impl<'a> Consumer for GroupedHashAggregator<'a> {
         Ok(ConsumeStatus::Continue)
     }
 
-    fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<()> {
         let timer = self.elapsed_compute.timer();
         let batch = create_batch_from_map(
             &self.mode,
@@ -475,8 +477,8 @@ impl<'a> Consumer for GroupedHashAggregator<'a> {
             &self.schema,
         )?;
         timer.done();
-        self.consumer.consume(batch)?;
-        self.consumer.finish()
+        self.consumer.consume(batch).await?;
+        self.consumer.finish().await
     }
 }
 
@@ -1069,9 +1071,9 @@ mod tests {
             };
             while let Some(result) = stream.next().await {
                 let batch = result?;
-                consumer.consume(batch)?;
+                consumer.consume(batch).await?;
             }
-            consumer.finish();
+            consumer.finish().await;
             Ok(())
         }
 

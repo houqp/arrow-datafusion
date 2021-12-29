@@ -172,8 +172,8 @@ impl ExecutionPlan for WindowAggExec {
 
         timer.done();
 
-        consumer.consume(agg_batch)?;
-        consumer.finish()
+        consumer.consume(agg_batch).await?;
+        consumer.finish().await
     }
 
     fn fmt_as(

@@ -177,9 +177,9 @@ impl ExecutionPlan for MockExec {
             .collect();
 
         for batch in data {
-            consumer.consume(batch?)?;
+            consumer.consume(batch?).await?;
         }
-        consumer.finish()
+        consumer.finish().await
     }
 
     fn fmt_as(
@@ -286,9 +286,9 @@ impl ExecutionPlan for BarrierExec {
         let data = self.data[partition].clone();
         self.barrier.wait().await;
         for batch in data {
-            consumer.consume(batch)?;
+            consumer.consume(batch).await?;
         }
-        consumer.finish()
+        consumer.finish().await
     }
 
     fn fmt_as(

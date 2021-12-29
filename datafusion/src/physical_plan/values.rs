@@ -139,11 +139,11 @@ impl ExecutionPlan for ValuesExec {
         }
 
         for batch in &self.data {
-            if consumer.consume(batch.clone())? == ConsumeStatus::Terminate {
+            if consumer.consume(batch.clone()).await? == ConsumeStatus::Terminate {
                 break;
             }
         }
-        Ok(())
+        consumer.finish().await
     }
 
     fn fmt_as(

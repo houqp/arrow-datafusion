@@ -159,16 +159,17 @@ struct Filter<'a> {
     baseline_metrics: BaselineMetrics,
 }
 
+#[async_trait]
 impl<'a> Consumer for Filter<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let timer = self.baseline_metrics.elapsed_compute().timer();
         let filtered_batch = batch_filter(&batch, &self.predicate)?;
         timer.done();
-        self.consumer.consume(filtered_batch)
+        self.consumer.consume(filtered_batch).await
     }
 
-    fn finish(&mut self) -> Result<()> {
-        self.consumer.finish()
+    async fn finish(&mut self) -> Result<()> {
+        self.consumer.finish().await
     }
 }
 

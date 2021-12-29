@@ -172,9 +172,9 @@ impl ExecutionPlan for SortExec {
         timer.done();
 
         if let Some(batch) = result {
-            consumer.consume(batch)?;
+            consumer.consume(batch).await?;
         }
-        consumer.finish()
+        consumer.finish().await
     }
 
     fn fmt_as(

@@ -324,25 +324,28 @@ impl<'a> Limiter<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Consumer for Limiter<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         // records time on drop
         let _timer = self.baseline_metrics.elapsed_compute().timer();
         if self.current_len == self.limit {
             Ok(ConsumeStatus::Terminate)
         } else if self.current_len + batch.num_rows() <= self.limit {
             self.current_len += batch.num_rows();
-            self.consumer.consume(batch)
+            self.consumer.consume(batch).await
         } else {
             let batch_rows = self.limit - self.current_len;
             self.current_len = self.limit;
-            self.consumer.consume(truncate_batch(&batch, batch_rows))?;
+            self.consumer
+                .consume(truncate_batch(&batch, batch_rows))
+                .await?;
             Ok(ConsumeStatus::Terminate)
         }
     }
 
-    fn finish(&mut self) -> Result<()> {
-        self.consumer.finish()
+    async fn finish(&mut self) -> Result<()> {
+        self.consumer.finish().await
     }
 }
 

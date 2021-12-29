@@ -132,20 +132,22 @@ impl ExecutionPlan for MemoryExec {
                         self.projected_schema.clone(),
                         columns.iter().map(|i| batch.column(*i).clone()).collect(),
                     )?;
-                    if consumer.consume(projected_batch)? == ConsumeStatus::Terminate {
+                    let status = consumer.consume(projected_batch).await?;
+                    if status == ConsumeStatus::Terminate {
                         break;
                     }
                 }
             }
             None => {
                 for batch in partition {
-                    if consumer.consume(batch.clone())? == ConsumeStatus::Terminate {
+                    let status = consumer.consume(batch.clone()).await?;
+                    if status == ConsumeStatus::Terminate {
                         break;
                     }
                 }
             }
         }
-        consumer.finish()?;
+        consumer.finish().await?;
         Ok(())
     }
 

@@ -95,36 +95,21 @@ pub enum ConsumeStatus {
     Terminate,
 }
 
+#[async_trait]
 pub trait Consumer: Send + Debug {
     // consumer that can trigger early termination like Limit exec should leverage try_consume
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus>;
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus>;
 
-    fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<()> {
         Ok(())
     }
 }
 
+#[async_trait]
 impl Consumer for Vec<RecordBatch> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         self.push(batch);
         Ok(ConsumeStatus::Continue)
-    }
-}
-
-/// Pass through consumer wrapper that passes consume method calls to its child, but not finish
-/// calls.
-#[derive(Debug)]
-struct PassthroughConsumer<'a> {
-    consumer: &'a mut dyn Consumer,
-}
-
-impl<'a> Consumer for PassthroughConsumer<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
-        self.consumer.consume(batch)
-    }
-
-    fn finish(&mut self) -> Result<()> {
-        Ok(())
     }
 }
 

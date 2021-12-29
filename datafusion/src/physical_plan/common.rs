@@ -20,11 +20,13 @@
 use super::{RecordBatchStream, SendableRecordBatchStream};
 use crate::error::{DataFusionError, Result};
 use crate::physical_plan::{ColumnStatistics, ExecutionPlan, Statistics};
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use arrow::compute::concat;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow::error::ArrowError;
 use arrow::error::Result as ArrowResult;
 use arrow::record_batch::RecordBatch;
+use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::{Future, SinkExt, Stream, StreamExt, TryStreamExt};
 use pin_project_lite::pin_project;
@@ -156,6 +158,39 @@ fn build_file_list_recurse(
         }
     }
     Ok(())
+}
+
+/// Executes a physical plan in tokio threadpool and writes its outputs to the provided mpsc sender
+pub(crate) fn spawn_execution(
+    input: Arc<dyn ExecutionPlan>,
+    mut output: mpsc::Sender<Result<RecordBatch>>,
+    partition: usize,
+) -> JoinHandle<()> {
+    #[derive(Debug)]
+    struct Piper {
+        output: mpsc::Sender<Result<RecordBatch>>,
+    }
+
+    #[async_trait]
+    impl Consumer for Piper {
+        async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+            self.output.send(Ok(batch)).await.ok();
+            Ok(ConsumeStatus::Continue)
+        }
+    }
+
+    tokio::spawn(async move {
+        let (re, mut output) = {
+            let mut piper = Piper { output };
+            let re = input.execute(partition, &mut piper).await;
+            (re, piper.output)
+        };
+        if let Err(err) = re {
+            // If send fails, plan being torn
+            // down, no place to send the error
+            output.send(Err(err)).await.ok();
+        }
+    })
 }
 
 /// Computes the statistics for an in-memory RecordBatch

@@ -238,11 +238,11 @@ impl ExecutionPlan for ParquetExec {
         );
         while let Some(result) = stream.next().await {
             let batch = result?;
-            if consumer.consume(batch)? == ConsumeStatus::Terminate {
+            if consumer.consume(batch).await? == ConsumeStatus::Terminate {
                 break;
             }
         }
-        Ok(())
+        consumer.finish().await
     }
 
     fn fmt_as(

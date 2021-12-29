@@ -141,11 +141,11 @@ impl<F: FormatReaderOpener> FileStream<F> {
     pub async fn produce(&mut self, consumer: &mut dyn Consumer) -> Result<()> {
         while let Some(result) = self.next().await {
             let batch = result?;
-            if consumer.consume(batch)? == ConsumeStatus::Terminate {
+            if consumer.consume(batch).await? == ConsumeStatus::Terminate {
                 break;
             }
         }
-        Ok(())
+        consumer.finish().await
     }
 }
 

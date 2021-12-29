@@ -139,8 +139,8 @@ impl ExecutionPlan for ExplainExec {
             ],
         )?;
 
-        consumer.consume(record_batch)?;
-        consumer.finish()
+        consumer.consume(record_batch).await?;
+        consumer.finish().await
     }
 
     fn fmt_as(

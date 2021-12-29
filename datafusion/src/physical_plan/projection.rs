@@ -238,8 +238,9 @@ struct Projector<'a> {
     baseline_metrics: BaselineMetrics,
 }
 
+#[async_trait]
 impl<'a> Consumer for Projector<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let _timer = self.baseline_metrics.elapsed_compute().timer();
         let projected_batch = self
             .expr
@@ -252,11 +253,11 @@ impl<'a> Consumer for Projector<'a> {
                 |arrays| RecordBatch::try_new(self.schema.clone(), arrays),
             )?;
 
-        self.consumer.consume(projected_batch)
+        self.consumer.consume(projected_batch).await
     }
 
-    fn finish(&mut self) -> Result<()> {
-        self.consumer.finish()
+    async fn finish(&mut self) -> Result<()> {
+        self.consumer.finish().await
     }
 }
 

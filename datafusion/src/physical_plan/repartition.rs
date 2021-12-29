@@ -207,11 +207,12 @@ impl ExecutionPlan for RepartitionExec {
             vec![],
         );
         for batch in batches {
-            if consumer.consume(batch)? == ConsumeStatus::Terminate {
+            let status = consumer.consume(batch).await?;
+            if status == ConsumeStatus::Terminate {
                 break;
             }
         }
-        consumer.finish()?;
+        consumer.finish().await?;
 
         Ok(())
     }
@@ -274,8 +275,9 @@ impl Repartitioner {
     }
 }
 
+#[async_trait]
 impl Consumer for Repartitioner {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         // FIXME: time fetch
         // // fetch the next batch
         // let timer = r_metrics.fetch_time.timer();

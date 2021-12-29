@@ -180,8 +180,9 @@ impl BuildSideCollector {
     }
 }
 
+#[async_trait]
 impl Consumer for BuildSideCollector {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         self.num_rows += batch.num_rows();
         self.batches.push(batch);
         Ok(ConsumeStatus::Continue)
@@ -247,8 +248,9 @@ impl<'a> HashJoiner<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Consumer for HashJoiner<'a> {
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         let timer = self.join_metrics.join_time.timer();
         let result = build_batch(
             &batch,
@@ -277,10 +279,10 @@ impl<'a> Consumer for HashJoiner<'a> {
                 JoinType::Inner | JoinType::Right => {}
             }
         }
-        self.consumer.consume(result?.0)
+        self.consumer.consume(result?.0).await
     }
 
-    fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<()> {
         let timer = self.join_metrics.join_time.timer();
         // For the left join, produce rows for unmatched rows
         match self.join_type {
@@ -304,7 +306,7 @@ impl<'a> Consumer for HashJoiner<'a> {
                 }
                 timer.done();
                 self.is_exhausted = true;
-                self.consumer.consume(result?)?;
+                self.consumer.consume(result?).await?;
             }
             JoinType::Left
             | JoinType::Full
@@ -313,7 +315,7 @@ impl<'a> Consumer for HashJoiner<'a> {
             | JoinType::Inner
             | JoinType::Right => {}
         }
-        self.consumer.finish()
+        self.consumer.finish().await
     }
 }
 

@@ -180,6 +180,7 @@ impl<'a> BatchCoalescer<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Consumer for BatchCoalescer<'a> {
     // FIXME: add back timer
     // // Get a clone (uses same underlying atomic) as self gets borrowed below
@@ -187,9 +188,9 @@ impl<'a> Consumer for BatchCoalescer<'a> {
     // // records time on drop
     // let _timer = cloned_time.timer();
 
-    fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+    async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
         if batch.num_rows() >= self.target_batch_size && self.buffer.is_empty() {
-            self.consumer.consume(batch)
+            self.consumer.consume(batch).await
         } else if batch.num_rows() == 0 {
             // discard empty batches
             Ok(ConsumeStatus::Continue)
@@ -206,14 +207,14 @@ impl<'a> Consumer for BatchCoalescer<'a> {
                 self.buffer.clear();
                 self.buffered_rows = 0;
                 // push batch downstream
-                self.consumer.consume(batch)
+                self.consumer.consume(batch).await
             } else {
                 Ok(ConsumeStatus::Continue)
             }
         }
     }
 
-    fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<()> {
         // we have reached the end of the input stream but there could still
         // be buffered batches
         if !self.buffer.is_empty() {
@@ -223,9 +224,9 @@ impl<'a> Consumer for BatchCoalescer<'a> {
             self.buffer.clear();
             self.buffered_rows = 0;
             // push batch downstream
-            self.consumer.consume(batch)?;
+            self.consumer.consume(batch).await?;
         }
-        self.consumer.finish()
+        self.consumer.finish().await
     }
 }
 
@@ -283,12 +284,14 @@ mod tests {
             finish_called: bool,
         }
 
+        #[async_trait]
         impl Consumer for DummyConsumer {
-            fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+            async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
                 self.consume_called = true;
                 Ok(ConsumeStatus::Continue)
             }
-            fn finish(&mut self) -> Result<()> {
+
+            async fn finish(&mut self) -> Result<()> {
                 self.finish_called = true;
                 Ok(())
             }

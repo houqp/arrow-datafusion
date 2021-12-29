@@ -24,6 +24,7 @@ use std::task::Poll;
 
 use futures::channel::mpsc;
 use futures::Stream;
+use futures::StreamExt;
 
 use async_trait::async_trait;
 
@@ -34,7 +35,8 @@ use super::common::AbortOnDropMany;
 use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{RecordBatchStream, Statistics};
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::{ConsumeStatus, Consumer, PassthroughConsumer};
+use crate::physical_plan::common::spawn_execution;
+use crate::physical_plan::{ConsumeStatus, Consumer};
 use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning};
 
 use super::SendableRecordBatchStream;
@@ -122,14 +124,25 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 let elapsed_compute = baseline_metrics.elapsed_compute().clone();
                 let _timer = elapsed_compute.timer();
 
-                let mut passthrough = PassthroughConsumer { consumer };
+                let mut join_handles = Vec::with_capacity(input_partitions);
+                let mut receiver = {
+                    let (sender, receiver) =
+                        mpsc::channel::<Result<RecordBatch>>(input_partitions);
+                    for part_i in 0..input_partitions {
+                        join_handles.push(spawn_execution(
+                            self.input.clone(),
+                            sender.clone(),
+                            part_i,
+                        ));
+                    }
+                    receiver
+                    // let sender drop here
+                };
 
-                for part_i in 0..input_partitions {
-                    // FIXME: execute in parallel
-                    self.input.execute(part_i, &mut passthrough).await?;
+                while let Some(batch) = receiver.next().await {
+                    consumer.consume(batch?).await?;
                 }
-                // only signal finish at the end
-                consumer.finish()
+                consumer.finish().await
             }
         }
     }

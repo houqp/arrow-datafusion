@@ -118,9 +118,9 @@ impl ExecutionPlan for EmptyExec {
             )));
         }
         for batch in self.data()? {
-            consumer.consume(batch)?;
+            consumer.consume(batch).await?;
         }
-        consumer.finish()
+        consumer.finish().await
     }
 
     fn fmt_as(

@@ -134,32 +134,6 @@ impl ExecutionPlan for SortPreservingMergeExec {
     async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         Ok(())
 
-        // /// Spawns a task to the tokio threadpool and writes its outputs to the provided mpsc sender
-        // pub(crate) fn spawn_execution(
-        //     input: Arc<dyn ExecutionPlan>,
-        //     mut output: mpsc::Sender<ArrowResult<RecordBatch>>,
-        //     partition: usize,
-        // ) -> JoinHandle<()> {
-        //     tokio::spawn(async move {
-        //         let mut stream = match input.execute(partition).await {
-        //             Err(e) => {
-        //                 // If send fails, plan being torn
-        //                 // down, no place to send the error
-        //                 let arrow_error = ArrowError::ExternalError(Box::new(e));
-        //                 output.send(Err(arrow_error)).await.ok();
-        //                 return;
-        //             }
-        //             Ok(stream) => stream,
-        //         };
-        //
-        //         while let Some(item) = stream.next().await {
-        //             // If send fails, plan being torn down,
-        //             // there is no place to send the error
-        //             output.send(item).await.ok();
-        //         }
-        //     })
-        // }
-
         // if 0 != partition {
         //     return Err(DataFusionError::Internal(format!(
         //         "SortPreservingMergeExec invalid partition {}",
