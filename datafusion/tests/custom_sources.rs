@@ -113,8 +113,8 @@ impl ExecutionPlan for CustomExecutionPlan {
         _partition: usize,
         consumer: &mut dyn Consumer,
     ) -> Result<()> {
-        consumer.consume(TEST_CUSTOM_RECORD_BATCH!()?)?;
-        consumer.finish()
+        consumer.consume(TEST_CUSTOM_RECORD_BATCH!()?).await?;
+        consumer.finish().await
     }
 
     fn fmt_as(

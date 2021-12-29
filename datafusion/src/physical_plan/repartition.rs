@@ -31,14 +31,14 @@ use crate::physical_plan::{DisplayFormatType, ExecutionPlan, Partitioning, Stati
 use arrow::record_batch::RecordBatch;
 use arrow::{array::Array, error::Result as ArrowResult};
 use arrow::{compute::take, datatypes::SchemaRef};
+use futures::stream::Stream;
+use futures::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::common::{AbortOnDropMany, AbortOnDropSingle};
 use super::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet};
 use async_trait::async_trait;
 
-use futures::stream::Stream;
-use futures::StreamExt;
 use hashbrown::HashMap;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -46,12 +46,21 @@ use tokio::sync::{
 };
 use tokio::task::JoinHandle;
 
-type MaybeBatch = Option<ArrowResult<RecordBatch>>;
-
 /// Inner state of [`RepartitionExec`].
 #[derive(Debug)]
 struct RepartitionExecState {
-    repartitioner: Option<Repartitioner>,
+    /// Channels for sending batches from input partitions to output partitions.
+    /// Key is the partition number.
+    channels: HashMap<
+        usize,
+        (
+            UnboundedSender<Result<RecordBatch>>,
+            UnboundedReceiver<Result<RecordBatch>>,
+        ),
+    >,
+
+    /// Helper that ensures that that background job is killed once it is no longer needed.
+    abort_helper: Arc<AbortOnDropMany<()>>,
 }
 
 /// The repartition operator maps N input partitions to M output partitions based on a
@@ -134,11 +143,40 @@ impl RepartitionExec {
             input,
             partitioning,
             state: Arc::new(Mutex::new(RepartitionExecState {
-                repartitioner: None,
+                channels: HashMap::new(),
+                abort_helper: Arc::new(AbortOnDropMany::<()>(vec![])),
             })),
             metrics: ExecutionPlanMetricsSet::new(),
         })
     }
+}
+
+fn spawn_repartition_task(
+    partitioning: Partitioning,
+    partition_senders: HashMap<usize, UnboundedSender<Result<RecordBatch>>>,
+    input: Arc<dyn ExecutionPlan>,
+    input_partition: usize,
+    r_metrics: RepartitionMetrics,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut input_repartitioner =
+            Repartitioner::new(partitioning, partition_senders, r_metrics);
+        let re = input
+            .execute(input_partition, &mut input_repartitioner)
+            .await;
+
+        // propagate error to receiver
+        if let Err(err) = re {
+            // TODO: propagate errors concurrently using tokio::spawn
+            for (_, sender) in input_repartitioner.partition_senders {
+                // If send fails, plan being torn
+                // down, no place to send the error
+                sender
+                    .send(Err(DataFusionError::Execution(err.to_string())))
+                    .ok();
+            }
+        }
+    })
 }
 
 #[async_trait]
@@ -180,41 +218,58 @@ impl ExecutionPlan for RepartitionExec {
         let mut state = self.state.lock().await;
 
         // if this is the first partition to be invoked then we need to set up initial state
-        if state.repartitioner.is_none() {
+        // FIXME: state.channels goes to empty after we executed all partitions as well, this is a
+        // bug
+        if state.channels.is_empty() {
             let num_input_partitions = self.input.output_partitioning().partition_count();
             let num_output_partitions = self.partitioning.partition_count();
-            let mut new_repartitioner =
-                Repartitioner::new(self.partitioning.clone(), num_output_partitions);
 
-            // FIXME: parallelize by input partition
-            // FIXME: start pushing to consumer while executing repartitioning so we can catch
-            // Terminate status
-            for i in 0..num_input_partitions {
-                // TODO: this seems wrong, we are only recording metrics for partition 0?
-                new_repartitioner.set_partition_metrics(i, partition, &self.metrics);
-                self.input.execute(i, &mut new_repartitioner).await?;
+            for ouput_partition in 0..num_output_partitions {
+                // Note that this operator uses unbounded channels to avoid deadlocks because
+                // the output partitions can be read in any order and this could cause input
+                // partitions to be blocked when sending data to output UnboundedReceivers that are not
+                // being read yet. This may cause high memory usage if the next operator is
+                // reading output partitions in order rather than concurrently. One workaround
+                // for this would be to add spill-to-disk capabilities.
+                let (sender, receiver) = mpsc::unbounded_channel::<Result<RecordBatch>>();
+                state.channels.insert(ouput_partition, (sender, receiver));
             }
-            state.repartitioner = Some(new_repartitioner);
+
+            let mut join_handles = Vec::with_capacity(num_input_partitions);
+            for input_partition in 0..num_input_partitions {
+                let output_partition_senders: HashMap<_, _> = state
+                    .channels
+                    .iter()
+                    .map(|(partition, (tx, _rx))| (*partition, tx.clone()))
+                    .collect();
+                // TODO: this seems wrong, we are only recording metrics for partition 0?
+                let r_metrics =
+                    RepartitionMetrics::new(input_partition, partition, &self.metrics);
+                join_handles.push(spawn_repartition_task(
+                    self.partitioning.clone(),
+                    output_partition_senders,
+                    self.input.clone(),
+                    input_partition,
+                    r_metrics,
+                ));
+            }
+
+            state.abort_helper = Arc::new(AbortOnDropMany(join_handles))
         };
 
-        // TODO: throw an error if same partitioner got executed twice
-        let batches = std::mem::replace(
-            &mut state
-                .repartitioner
-                .as_mut()
-                .expect("RepartitionExec state not initialized")
-                .partitions[partition],
-            vec![],
-        );
-        for batch in batches {
+        let mut stream =
+            UnboundedReceiverStream::new(state.channels.remove(&partition).unwrap().1);
+        let _drop_abort_helper = Arc::clone(&state.abort_helper);
+        drop(state); // unlock state to unblock other partition consumers
+
+        while let Some(re) = stream.next().await {
+            let batch = re?;
             let status = consumer.consume(batch).await?;
             if status == ConsumeStatus::Terminate {
                 break;
             }
         }
-        consumer.finish().await?;
-
-        Ok(())
+        consumer.finish().await
     }
 
     fn metrics(&self) -> Option<MetricsSet> {
@@ -240,38 +295,33 @@ impl ExecutionPlan for RepartitionExec {
 
 #[derive(Debug)]
 struct Repartitioner {
-    partitions: Vec<Vec<RecordBatch>>,
     partitioning: Partitioning,
+    num_partitions: usize,
     random_state: ahash::RandomState,
     hashes_buf: Vec<u64>,
-    r_metrics: Option<RepartitionMetrics>,
+    // sender for each output partition
+    partition_senders: HashMap<usize, UnboundedSender<Result<RecordBatch>>>,
+    r_metrics: RepartitionMetrics,
     // TODO: only needed for RoundRobinBatch
     counter: usize,
 }
 
 impl Repartitioner {
-    fn new(partitioning: Partitioning, output_partitions: usize) -> Self {
+    fn new(
+        partitioning: Partitioning,
+        partition_senders: HashMap<usize, UnboundedSender<Result<RecordBatch>>>,
+        r_metrics: RepartitionMetrics,
+    ) -> Self {
         Self {
-            partitions: (0..output_partitions)
-                .map(|_| Vec::new())
-                .collect::<Vec<_>>(),
             partitioning,
+            num_partitions: partition_senders.len(),
+            partition_senders,
+            r_metrics,
             // Use fixed random state
             random_state: ahash::RandomState::with_seeds(0, 0, 0, 0),
             counter: 0,
-            r_metrics: None,
             hashes_buf: vec![],
         }
-    }
-
-    // NOTE: this method needs to be invoked before calling self.consume
-    fn set_partition_metrics(
-        &mut self,
-        input: usize,
-        output: usize,
-        metrics: &ExecutionPlanMetricsSet,
-    ) {
-        self.r_metrics = Some(RepartitionMetrics::new(input, output, metrics));
     }
 }
 
@@ -287,17 +337,20 @@ impl Consumer for Repartitioner {
         // TODO: avoid matching on partitioning on each batch
         match &self.partitioning {
             Partitioning::RoundRobinBatch(_) => {
-                let output_partition = self.counter % self.partitions.len();
-                self.partitions[output_partition].push(batch);
+                let timer = self.r_metrics.send_time.timer();
+                let output_partition = self.counter % self.num_partitions;
+                if let Some(sender) = self.partition_senders.get_mut(&output_partition) {
+                    if sender.send(Ok(batch)).is_err() {
+                        // If the other end has hung up, it was an early shutdown (e.g. LIMIT)
+                        self.partition_senders.remove(&output_partition);
+                    }
+                }
                 self.counter += 1;
+                timer.done();
             }
             Partitioning::Hash(exprs, _) => {
-                let timer = self
-                    .r_metrics
-                    .as_ref()
-                    .expect("partition metric not initialized")
-                    .repart_time
-                    .timer();
+                // FIXME: propagate error through sender channels
+                let timer = self.r_metrics.repart_time.timer();
                 let arrays = exprs
                     .iter()
                     .map(|expr| Ok(expr.evaluate(&batch)?.into_array(batch.num_rows())))
@@ -307,19 +360,21 @@ impl Consumer for Repartitioner {
                 // Hash arrays and compute buckets based on number of partitions
                 let hashes =
                     create_hashes(&arrays, &self.random_state, &mut self.hashes_buf)?;
-                let num_output_partitions = self.partitions.len();
-                let mut indices = vec![vec![]; num_output_partitions];
+                let num_partitions = self.num_partitions;
+                let mut indices = vec![vec![]; num_partitions];
                 for (index, hash) in hashes.iter().enumerate() {
-                    indices[(*hash % num_output_partitions as u64) as usize]
-                        .push(index as u64)
+                    indices[(*hash % num_partitions as u64) as usize].push(index as u64)
                 }
+                timer.done();
 
-                for (output_partition_idx, partition_indices) in
+                for (output_partition, partition_indices) in
                     indices.into_iter().enumerate()
                 {
                     if partition_indices.is_empty() {
                         continue;
                     }
+
+                    let timer = self.r_metrics.repart_time.timer();
                     let indices = partition_indices.into();
                     // Produce batches based on indices
                     let columns = batch
@@ -331,9 +386,18 @@ impl Consumer for Repartitioner {
                         })
                         .collect::<Result<Vec<Arc<dyn Array>>>>()?;
                     let output_batch = RecordBatch::try_new(batch.schema(), columns)?;
-                    self.partitions[output_partition_idx].push(output_batch);
+                    timer.done();
+
+                    let timer = self.r_metrics.send_time.timer();
+                    // if there is still a receiver, send to it
+                    if let Some(tx) = self.partition_senders.get_mut(&output_partition) {
+                        if tx.send(Ok(output_batch)).is_err() {
+                            // If the other end has hung up, it was an early shutdown (e.g. LIMIT)
+                            self.partition_senders.remove(&output_partition);
+                        }
+                    }
+                    timer.done();
                 }
-                timer.done();
             }
             other => {
                 // this should be unreachable as long as the validation logic

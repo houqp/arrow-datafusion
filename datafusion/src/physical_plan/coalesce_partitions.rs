@@ -118,6 +118,7 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 self.input.execute(0, consumer).await
             }
             _ => {
+                // FIXME: record compute time minus wait time
                 let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
                 // record the (very) minimal work done so that
                 // elapsed_compute is not reported as 0
@@ -125,22 +126,25 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 let _timer = elapsed_compute.timer();
 
                 let mut join_handles = Vec::with_capacity(input_partitions);
-                let mut receiver = {
-                    let (sender, receiver) =
-                        mpsc::channel::<Result<RecordBatch>>(input_partitions);
-                    for part_i in 0..input_partitions {
-                        join_handles.push(spawn_execution(
-                            self.input.clone(),
-                            sender.clone(),
-                            part_i,
-                        ));
-                    }
-                    receiver
-                    // let sender drop here
-                };
+                let (sender, mut receiver) =
+                    mpsc::channel::<Result<RecordBatch>>(input_partitions);
+                for part_i in 0..input_partitions {
+                    join_handles.push(spawn_execution(
+                        self.input.clone(),
+                        sender.clone(),
+                        part_i,
+                    ));
+                }
+                // drop the first unused sender
+                drop(sender);
+                let abort_helper = AbortOnDropMany(join_handles);
 
-                while let Some(batch) = receiver.next().await {
-                    consumer.consume(batch?).await?;
+                while let Some(re) = receiver.next().await {
+                    let batch = re?;
+                    let status = consumer.consume(batch).await?;
+                    if status == ConsumeStatus::Terminate {
+                        break;
+                    }
                 }
                 consumer.finish().await
             }

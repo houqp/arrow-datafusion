@@ -81,9 +81,9 @@ impl ExecutionPlan for CustomPlan {
 
     async fn execute(&self, _: usize, consumer: &mut dyn Consumer) -> Result<()> {
         for batch in &self.batches {
-            consumer.consume(batch.clone())?;
+            consumer.consume(batch.clone()).await?;
         }
-        consumer.finish()
+        consumer.finish().await
     }
 
     fn fmt_as(

@@ -278,7 +278,7 @@ mod tests {
         let plan = MemoryExec::try_new(vec![vec![empty_batch]], schema, None)?;
         let plan = CoalesceBatchesExec::new(Arc::new(plan), 1024);
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq, Eq)]
         struct DummyConsumer {
             consume_called: bool,
             finish_called: bool,
@@ -303,8 +303,13 @@ mod tests {
         };
         plan.execute(0, &mut consumer).await?;
 
-        assert_eq!(consumer.consume_called, true);
-        assert_eq!(consumer.finish_called, true);
+        assert_eq!(
+            consumer,
+            DummyConsumer {
+                consume_called: true,
+                finish_called: true
+            }
+        );
         Ok(())
     }
 

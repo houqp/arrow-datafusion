@@ -475,14 +475,16 @@ impl ExecutionPlan for TopKExec {
             state: BTreeMap<i64, String>,
         }
 
+        #[async_trait]
         impl<'a> Consumer for TopKReader<'a> {
-            fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
+            async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
                 self.state = accumulate_batch(&batch, self.state.clone(), self.k);
                 self.consumer
                     .consume(RecordBatch::new_empty(self.schema.clone()))
+                    .await
             }
 
-            fn finish(&mut self) -> Result<()> {
+            async fn finish(&mut self) -> Result<()> {
                 let (revenue, customer): (Vec<i64>, Vec<&String>) =
                     self.state.iter().rev().unzip();
 
@@ -494,8 +496,8 @@ impl ExecutionPlan for TopKExec {
                         Arc::new(Int64Array::from(revenue)),
                     ],
                 )?;
-                self.consumer.consume(batch)?;
-                self.consumer.finish()
+                self.consumer.consume(batch).await?;
+                self.consumer.finish().await
             }
         }
 
