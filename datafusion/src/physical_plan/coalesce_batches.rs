@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(
             consumer,
             DummyConsumer {
-                consume_called: true,
+                consume_called: false,
                 finish_called: true
             }
         );

@@ -344,6 +344,7 @@ struct HashAggregator<'a> {
     consumer: &'a mut dyn Consumer,
     accumulators: Vec<AccumulatorItem>,
     expressions: Vec<Vec<Arc<dyn PhysicalExpr>>>,
+    baseline_metrics: BaselineMetrics,
     elapsed_compute: metrics::Time,
 }
 
@@ -367,6 +368,7 @@ impl<'a> HashAggregator<'a> {
         Ok(Self {
             mode,
             schema,
+            baseline_metrics,
             elapsed_compute,
             accumulators,
             expressions,
@@ -393,6 +395,7 @@ impl<'a> Consumer for HashAggregator<'a> {
         let batch = finalize_aggregation(&self.accumulators, &self.mode)
             .map(|columns| RecordBatch::try_new(self.schema.clone(), columns))
             .map_err(DataFusionError::into_arrow_external_error)??;
+        (&batch).record_output(&self.baseline_metrics);
         timer.done();
         self.consumer.consume(batch).await?;
         self.consumer.finish().await
@@ -403,13 +406,14 @@ impl<'a> Consumer for HashAggregator<'a> {
 struct GroupedHashAggregator<'a> {
     consumer: &'a mut dyn Consumer,
     schema: SchemaRef,
-    elapsed_compute: metrics::Time,
     mode: AggregateMode,
     aggr_expr: Vec<Arc<dyn AggregateExpr>>,
     group_expr: Vec<Arc<dyn PhysicalExpr>>,
     aggregate_exprs: Vec<Vec<Arc<dyn PhysicalExpr>>>,
     accumulators: Accumulators,
     random_state: RandomState,
+    elapsed_compute: metrics::Time,
+    baseline_metrics: BaselineMetrics,
 }
 
 impl<'a> GroupedHashAggregator<'a> {
@@ -439,13 +443,14 @@ impl<'a> GroupedHashAggregator<'a> {
         Ok(Self {
             schema,
             consumer,
-            elapsed_compute,
             aggr_expr,
             aggregate_exprs,
             group_expr,
             accumulators,
             random_state,
             mode,
+            elapsed_compute,
+            baseline_metrics,
         })
     }
 }
@@ -476,6 +481,7 @@ impl<'a> Consumer for GroupedHashAggregator<'a> {
             self.group_expr.len(),
             &self.schema,
         )?;
+        (&batch).record_output(&self.baseline_metrics);
         timer.done();
         self.consumer.consume(batch).await?;
         self.consumer.finish().await
@@ -1071,7 +1077,10 @@ mod tests {
             };
             while let Some(result) = stream.next().await {
                 let batch = result?;
-                consumer.consume(batch).await?;
+                let status = consumer.consume(batch).await?;
+                if status == ConsumeStatus::Terminate {
+                    break;
+                }
             }
             consumer.finish().await;
             Ok(())
