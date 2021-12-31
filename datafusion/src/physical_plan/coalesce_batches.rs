@@ -38,7 +38,7 @@ use async_trait::async_trait;
 use futures::stream::{Stream, StreamExt};
 use log::debug;
 
-use super::metrics::{BaselineMetrics, MetricsSet};
+use super::metrics::{self, BaselineMetrics, MetricsSet};
 use super::{metrics::ExecutionPlanMetricsSet, Statistics};
 
 /// CoalesceBatchesExec combines small batches into larger batches for more efficient use of
@@ -114,10 +114,9 @@ impl ExecutionPlan for CoalesceBatchesExec {
 
     async fn execute(&self, partition: usize, consumer: &mut dyn Consumer) -> Result<()> {
         let mut coalescer = BatchCoalescer::new(
-            partition,
             self.input.schema(),
             self.target_batch_size,
-            &self.metrics,
+            BaselineMetrics::new(&self.metrics, partition),
             consumer,
         );
         self.input.execute(partition, &mut coalescer).await
@@ -158,15 +157,15 @@ struct BatchCoalescer<'a> {
     buffer: Vec<RecordBatch>,
     /// Buffered row count
     buffered_rows: usize,
+    compute_time: metrics::Time,
     consumer: &'a mut dyn Consumer,
 }
 
 impl<'a> BatchCoalescer<'a> {
     fn new(
-        partition: usize,
         schema: SchemaRef,
         target_batch_size: usize,
-        metrics: &ExecutionPlanMetricsSet,
+        baseline_metrics: BaselineMetrics,
         consumer: &'a mut dyn Consumer,
     ) -> Self {
         Self {
@@ -174,7 +173,7 @@ impl<'a> BatchCoalescer<'a> {
             target_batch_size,
             buffer: Vec::new(),
             buffered_rows: 0,
-            // baseline_metrics: BaselineMetrics::new(&metrics, partition),
+            compute_time: baseline_metrics.elapsed_compute().clone(),
             consumer,
         }
     }
@@ -182,21 +181,17 @@ impl<'a> BatchCoalescer<'a> {
 
 #[async_trait]
 impl<'a> Consumer for BatchCoalescer<'a> {
-    // FIXME: add back timer
-    // // Get a clone (uses same underlying atomic) as self gets borrowed below
-    // let cloned_time = self.baseline_metrics.elapsed_compute().clone();
-    // // records time on drop
-    // let _timer = cloned_time.timer();
-
     async fn consume(&mut self, batch: RecordBatch) -> Result<ConsumeStatus> {
-        if batch.num_rows() >= self.target_batch_size && self.buffer.is_empty() {
+        let _timer = self.compute_time.timer();
+        let num_rows = batch.num_rows();
+        if num_rows >= self.target_batch_size && self.buffer.is_empty() {
             self.consumer.consume(batch).await
-        } else if batch.num_rows() == 0 {
+        } else if num_rows == 0 {
             // discard empty batches
             Ok(ConsumeStatus::Continue)
         } else {
             // add to the buffered batches
-            self.buffered_rows += batch.num_rows();
+            self.buffered_rows += num_rows;
             self.buffer.push(batch);
             // check to see if we have enough batches yet
             if self.buffered_rows >= self.target_batch_size {
